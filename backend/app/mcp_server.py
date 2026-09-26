@@ -15,6 +15,7 @@ import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, TypeVar
+from urllib.parse import urlparse
 
 from fastapi import HTTPException
 from mcp.server.fastmcp import FastMCP
@@ -426,9 +427,26 @@ def attach_file(
     return {"attachment": _idempotent("attach_file", idempotency_key, operation)}
 
 
-def _api_is_ready() -> bool:
+def _app_base_url() -> str:
+    if not (ROOT / "web-dist" / "index.html").is_file():
+        return APP_URL
+
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    server_url_file = local_app_data / "IdeaMiner" / "server.url"
     try:
-        with urllib.request.urlopen(API_HEALTH_URL, timeout=1) as response:
+        candidate = server_url_file.read_text(encoding="utf-8").strip()
+        parsed = urlparse(candidate)
+        if parsed.scheme == "http" and parsed.hostname == "127.0.0.1" and parsed.port:
+            return f"http://127.0.0.1:{parsed.port}"
+    except (OSError, ValueError):
+        pass
+    return "http://127.0.0.1:8000"
+
+
+def _api_is_ready(base_url: str | None = None) -> bool:
+    try:
+        health_url = f"{base_url}/api/health" if base_url else API_HEALTH_URL
+        with urllib.request.urlopen(health_url, timeout=1) as response:
             return response.status == 200
     except (OSError, urllib.error.URLError):
         return False
@@ -441,9 +459,12 @@ def _api_is_ready() -> bool:
 def open_ideaminer(reference: str = "") -> dict[str, Any]:
     """Start the local IdeaMiner browser app if needed and open it, optionally focused on one idea."""
     idea = _resolve_idea(reference) if reference.strip() else None
-    url = f"{APP_URL}/?idea={idea['id']}" if idea else APP_URL
+    packaged = (ROOT / "web-dist" / "index.html").is_file()
+    base_url = _app_base_url() if packaged else APP_URL
+    start_path = f"/?idea={idea['id']}" if idea else "/"
+    url = f"{base_url}{start_path}"
     started = False
-    if not _api_is_ready():
+    if not _api_is_ready(base_url if packaged else None):
         launcher = ROOT / "launcher.py"
         if not launcher.is_file():
             raise ValueError(f"IdeaMiner launcher was not found at {launcher}")
@@ -451,7 +472,10 @@ def open_ideaminer(reference: str = "") -> dict[str, Any]:
         if os.name == "nt":
             creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         launcher_environment = os.environ.copy()
-        launcher_environment["IDEAMINER_START_URL"] = url
+        if packaged:
+            launcher_environment["IDEAMINER_START_PATH"] = start_path
+        else:
+            launcher_environment["IDEAMINER_START_URL"] = url
         subprocess.Popen(
             [sys.executable, str(launcher)],
             cwd=ROOT,
@@ -464,8 +488,12 @@ def open_ideaminer(reference: str = "") -> dict[str, Any]:
         )
         started = True
         deadline = time.monotonic() + 25
-        while time.monotonic() < deadline and not _api_is_ready():
+        while time.monotonic() < deadline:
+            base_url = _app_base_url() if packaged else APP_URL
+            if _api_is_ready(base_url if packaged else None):
+                break
             time.sleep(0.25)
+        url = f"{base_url}{start_path}"
     if not started:
         webbrowser.open(url)
     return {"status": "opened", "started": started, "url": url, "idea_id": idea["id"] if idea else None}

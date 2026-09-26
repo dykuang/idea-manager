@@ -14,8 +14,13 @@ import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-# A launched copy owns its adjacent database unless the operator explicitly overrides it.
-os.environ.setdefault("IDEAMINER_DB", str(ROOT / "data" / "ideaminer.db"))
+WEB_DIST = ROOT / "web-dist"
+if "IDEAMINER_DB" not in os.environ:
+    if (WEB_DIST / "index.html").is_file():
+        local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        os.environ["IDEAMINER_DB"] = str(local_app_data / "IdeaMiner" / "data" / "ideaminer.db")
+    else:
+        os.environ["IDEAMINER_DB"] = str(ROOT / "data" / "ideaminer.db")
 
 import uvicorn
 
@@ -75,7 +80,57 @@ def _stop_frontend(process: subprocess.Popen[bytes]) -> None:
             process.kill()
 
 
+def _run_packaged() -> int:
+    api_port = _available_port(8000)
+    app_url = f"http://127.0.0.1:{api_port}"
+    start_path = os.environ.get("IDEAMINER_START_PATH", "/")
+    if not start_path.startswith("/") or start_path.startswith("//"):
+        start_path = "/"
+    start_url = f"{app_url}{start_path}"
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    server_url_file = local_app_data / "IdeaMiner" / "server.url"
+    server_url_file.parent.mkdir(parents=True, exist_ok=True)
+    server_url_file.write_text(app_url, encoding="utf-8")
+    app.state.shutdown_handler = shutdown_requested.set
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=api_port, log_level="info")
+    )
+    api_thread = threading.Thread(target=server.run, name="ideaminer-api")
+    api_thread.start()
+
+    print("\nIdeaMiner is starting. Keep this window open while you work.")
+    print(f"Library: {os.environ['IDEAMINER_DB']}")
+    print(f"Web:     {app_url}")
+    print("Use the Quit button in the app, or press Ctrl+C here, to stop.\n")
+
+    try:
+        if _wait_for(f"{app_url}/api/health"):
+            webbrowser.open(start_url)
+        else:
+            print("IdeaMiner did not become ready in time. Check the messages above.")
+            shutdown_requested.set()
+
+        while not shutdown_requested.wait(0.5):
+            if not api_thread.is_alive():
+                print("The IdeaMiner server stopped unexpectedly.")
+                shutdown_requested.set()
+    except KeyboardInterrupt:
+        print("\nStopping IdeaMiner...")
+        shutdown_requested.set()
+    finally:
+        server.should_exit = True
+        api_thread.join(timeout=8)
+        if server_url_file.is_file() and server_url_file.read_text(encoding="utf-8") == app_url:
+            server_url_file.unlink()
+        print("IdeaMiner stopped. Your ideas are safely stored.")
+
+    return 0
+
+
 def main() -> int:
+    if (WEB_DIST / "index.html").is_file():
+        return _run_packaged()
+
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     if npm is None:
         print("npm was not found. Install Node.js and try again.")

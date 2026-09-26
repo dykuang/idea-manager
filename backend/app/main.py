@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .agent_profiles import CredentialStoreError, credential_store_available, delete_api_key, get_api_key, load_store, reset_profile, save_api_key, save_profile, set_active_provider
 from .database import db, init_db
@@ -1897,3 +1898,8 @@ def export_markdown() -> Response:
                 lines.append(f"- **{relation['relation_type']}** → {by_id.get(other_id, {}).get('title', 'Unknown')}" + (f" — {relation['note']}" if relation["note"] else ""))
             lines.append("")
     return Response("\n".join(lines), media_type="text/markdown", headers={"Content-Disposition": "attachment; filename=ideaminer-export.md"})
+
+
+WEB_DIST = Path(__file__).resolve().parents[2] / "web-dist"
+if (WEB_DIST / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")

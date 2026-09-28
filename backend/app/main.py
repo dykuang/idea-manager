@@ -471,9 +471,13 @@ Never expose a raw reference such as "Idea #4" in the answer. Refer to a supplie
 When referring to an explicitly supplied local file, use its stable token [[file:ID]] instead of a machine-specific path.
 When elaborating, make the answer a self-contained research note suitable for saving. Start it with one level-one Markdown heading containing a concise refined title.
 Always finish by calling submit_research_result. Write the answer in clear Markdown."""
+    conversation = "\n\n".join(
+        f"{message.role.title()}: {message.content}" for message in payload.conversation
+    )
+    chat_input = f"Conversation so far:\n{conversation}\n\n" if conversation else ""
     answer, proposals = await _call_agent_provider(
         config, model=model, reasoning_effort=reasoning_effort, instructions=instructions,
-        input_text=f"User request:\n{payload.prompt}\n\nIdeaMiner context:\n{json.dumps(context, ensure_ascii=False)}",
+        input_text=f"{chat_input}User message:\n{payload.prompt}\n\nIdeaMiner context:\n{json.dumps(context, ensure_ascii=False)}",
         web_search=payload.web_search,
     )
     return answer, proposals, model, provider
@@ -711,7 +715,7 @@ def agent_status() -> dict[str, Any]:
         "providers": profiles,
         "credential_store_available": credential_store_available(),
         "capabilities": ["idea-context", "structured-proposals"] + (["web-search"] if config["web_search"] else []),
-        "privacy": "Only the context shown in Agent Workspace is sent. Original raw captures are excluded; local files require explicit selection. Remembered API keys stay in the operating system credential vault.",
+        "privacy": "Your chat messages and only the selected IdeaMiner context are sent. Original raw captures are excluded; local files require explicit selection. Remembered API keys stay in the operating system credential vault.",
     }
 
 

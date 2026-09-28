@@ -133,6 +133,11 @@ export interface AgentRunResult {
   context_summary: { ideas: number; relations: number; files: number; raw_text_shared: boolean }
 }
 
+export interface AgentMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface AgentRunSaveResult {
   action: 'update_original' | 'create_child'
   idea: Idea

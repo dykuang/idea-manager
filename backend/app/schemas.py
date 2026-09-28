@@ -77,9 +77,20 @@ class ImportRequest(ImportPreviewRequest):
     project_strategy: Literal["merge", "rename"] = "merge"
 
 
+class AgentMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("content")
+    @classmethod
+    def trim_message(cls, value: str) -> str:
+        return value.strip()
+
+
 class AgentRunRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: Literal["explore", "elaborate", "critique", "connect", "synthesize"] = "explore"
+    conversation: list[AgentMessage] = Field(default_factory=list, max_length=12)
     scope_type: Literal["all", "project", "group"] = "all"
     scope_id: int | None = None
     idea_id: int | None = None

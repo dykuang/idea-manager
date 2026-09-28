@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Check, FileText, GitBranch, Globe2, KeyRound, LoaderCircle, Paperclip, Save, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, FileText, GitBranch, Globe2, KeyRound, LoaderCircle, Paperclip, Save, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { IdeaMarkdown } from './IdeaMarkdown'
-import type { AgentMode, AgentProposal, AgentProvider, AgentProviderOption, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, Project, ProjectGroup, ReasoningEffort } from '../types'
+import type { AgentMessage, AgentMode, AgentProposal, AgentProvider, AgentProviderOption, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, Project, ProjectGroup, ReasoningEffort } from '../types'
 
 type Scope = { type: 'all' } | { type: 'project'; id: number } | { type: 'group'; id: number }
 
-const modes: { id: AgentMode; label: string; prompt: string }[] = [
-  { id: 'explore', label: 'Explore', prompt: 'Explore these ideas. Surface promising directions, important unknowns, and the next questions worth investigating.' },
-  { id: 'elaborate', label: 'Elaborate', prompt: 'Develop the selected material into a clearer research idea with motivation, method, evidence needs, and next steps.' },
-  { id: 'critique', label: 'Critique', prompt: 'Stress-test these ideas. Identify weak assumptions, plausible counterarguments, risks, and missing evidence.' },
-  { id: 'connect', label: 'Connect', prompt: 'Look for meaningful, non-obvious connections among these ideas. Explain each connection and propose useful typed relations.' },
-  { id: 'synthesize', label: 'Synthesize', prompt: 'Synthesize these ideas into a coherent research direction while preserving important tensions and alternatives.' },
+const modes: { id: AgentMode; label: string }[] = [
+  { id: 'explore', label: 'Explore' },
+  { id: 'elaborate', label: 'Elaborate' },
+  { id: 'critique', label: 'Critique' },
+  { id: 'connect', label: 'Connect' },
+  { id: 'synthesize', label: 'Synthesize' },
 ]
 
 function payloadPreview(proposal: AgentProposal) {
@@ -33,7 +33,9 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
 }) {
   const [status, setStatus] = useState<AgentStatus | null>(null)
   const [mode, setMode] = useState<AgentMode>(contextIdea ? 'elaborate' : 'explore')
-  const [prompt, setPrompt] = useState(contextIdea ? modes[1].prompt : modes[0].prompt)
+  const [prompt, setPrompt] = useState('')
+  const [chatMessages, setChatMessages] = useState<AgentMessage[]>([])
+  const [sessionScope, setSessionScope] = useState<Scope>(scope.type === 'project' && projects.find(item => item.id === scope.id)?.system_key === 'recycle' ? { type: 'all' } : scope)
   const [model, setModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [provider, setProvider] = useState<AgentProvider>('openai')
@@ -53,6 +55,9 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
   const [savedResult, setSavedResult] = useState<AgentRunSaveResult | null>(null)
   const [availableFiles, setAvailableFiles] = useState<Attachment[]>([])
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([])
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [chatMessages, running])
 
   useEffect(() => {
     api.agentStatus().then(value => {
@@ -66,24 +71,26 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
   useEffect(() => {
     const params = new URLSearchParams()
     if (contextIdea) params.set('idea_id', String(contextIdea.id))
-    else if (scope.type === 'project') params.set('project_id', String(scope.id))
-    else if (scope.type === 'group') params.set('group_id', String(scope.id))
+    else if (sessionScope.type === 'project') params.set('project_id', String(sessionScope.id))
+    else if (sessionScope.type === 'group') params.set('group_id', String(sessionScope.id))
     api.attachments(params).then(files => { setAvailableFiles(files); setSelectedFileIds([]) }).catch(() => setAvailableFiles([]))
-  }, [contextIdea?.id, scope.type, scope.type === 'all' ? null : scope.id])
+  }, [contextIdea?.id, sessionScope.type, sessionScope.type === 'all' ? null : sessionScope.id])
 
   const contextName = useMemo(() => {
-    if (contextIdea) return `Idea: ${contextIdea.title}`
-    if (scope.type === 'project') return `Project: ${projects.find(item => item.id === scope.id)?.name ?? 'Unknown'}`
-    if (scope.type === 'group') return `Group: ${groups.find(item => item.id === scope.id)?.name ?? 'Unknown'}`
+    const projectContext = sessionScope.type === 'project' ? `Project: ${projects.find(item => item.id === sessionScope.id)?.name ?? 'Unknown'}`
+      : sessionScope.type === 'group' ? `Group: ${groups.find(item => item.id === sessionScope.id)?.name ?? 'Unknown'}`
+        : 'All active projects'
+    if (contextIdea) return `${projectContext} · ${contextIdea.title}`
+    if (sessionScope.type === 'project') return projectContext
+    if (sessionScope.type === 'group') return projectContext
     return 'All active ideas (up to 40 recent ideas)'
-  }, [contextIdea, groups, projects, scope])
+  }, [contextIdea, groups, projects, sessionScope])
 
   const activeProfile = status?.providers.find(item => item.id === provider) ?? null
   const keyReady = Boolean(apiKey.trim() || activeProfile?.configured || !activeProfile?.api_key_required)
 
   function chooseMode(next: AgentMode) {
     setMode(next)
-    setPrompt(modes.find(item => item.id === next)?.prompt ?? '')
   }
 
   function loadProfile(option: AgentProviderOption, nextStatus?: AgentStatus) {
@@ -104,14 +111,18 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
   }
 
   async function run() {
-    if (!prompt.trim()) return
+    if (!prompt.trim() || running) return
+    const userMessage = prompt.trim()
     setRunning(true); setError(''); setResult(null); setSavedResult(null); setResultMode(null)
     try {
       const next = await api.runAgent({
-        prompt, mode, scope_type: scope.type, scope_id: scope.type === 'all' ? null : scope.id,
+        prompt: userMessage, conversation: chatMessages.slice(-12), mode,
+        scope_type: sessionScope.type, scope_id: sessionScope.type === 'all' ? null : sessionScope.id,
         idea_id: contextIdea?.id ?? null, model, reasoning_effort: reasoningEffort, web_search: webSearch, attachment_ids: selectedFileIds,
       })
       setResult(next); setResultMode(mode)
+      setChatMessages(current => [...current, { role: 'user', content: userMessage }, { role: 'assistant', content: next.answer }])
+      setPrompt('')
     } catch (error) {
       setError(error instanceof Error ? error.message : 'The agent could not complete this request')
     } finally { setRunning(false) }
@@ -157,7 +168,7 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
 
   return <div className="modal-backdrop agent-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
     <section className="agent-workspace">
-      <header><div><p className="eyebrow">RESEARCH AGENT</p><h2><Sparkles size={25}/> Agent Workspace</h2></div><button className="icon-button" onClick={onClose}><X size={20}/></button></header>
+      <header><div><p className="eyebrow">RESEARCH AGENT</p><h2><Sparkles size={25}/> Agent chat</h2></div><button className="icon-button" onClick={onClose} aria-label="Close agent chat"><X size={20}/></button></header>
       {!status ? <div className="agent-loading"><LoaderCircle className="spin" size={20}/> Checking provider…</div> : <>
         <nav className="agent-provider-tabs" aria-label="Agent providers">{status.providers.map(item => <button key={item.id} className={provider === item.id ? 'active' : ''} onClick={() => void chooseProvider(item.id)}><span>{item.label}</span><i className={item.configured ? 'ready' : ''}/></button>)}</nav>
         {(!status.configured || editingConnection) ? <div className="agent-setup agent-connection-form">
@@ -172,18 +183,37 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
             <small><ShieldCheck size={13}/> Keys are never stored in SQLite, browser storage, exports, or the profile file. {!status.credential_store_available && 'Secure OS storage is unavailable, so new keys remain session-only.'}</small>
           </div></div> : <div className="agent-connected"><ShieldCheck size={18}/><div><strong>{status.provider_label} ready</strong><span>{status.default_model} · {status.reasoning_effort} effort · {status.configuration_source === 'secure_storage' ? 'credential remembered' : status.configuration_source === 'session' ? 'session credential' : status.configuration_source === 'environment' ? 'environment credential' : 'local endpoint'}</span><small>{status.base_url}</small></div><button onClick={() => setEditingConnection(true)}>Edit</button><button onClick={() => void forgetConnection()}>Forget</button></div>}
         {status.configured && <>
-        <div className="agent-context"><span>Context</span><strong>{contextName}</strong><small>{status.privacy}</small></div>
-        <div className="agent-modes">{modes.map(item => <button key={item.id} className={mode === item.id ? 'active' : ''} onClick={() => chooseMode(item.id)}>{item.label}</button>)}</div>
+        <div className="agent-session-bar">
+          <label><span>Project context</span><select value={sessionScope.type === 'all' ? 'all' : `${sessionScope.type}:${sessionScope.id}`} onChange={event => {
+            const value = event.target.value
+            if (value === 'all') setSessionScope({ type: 'all' })
+            else { const [type, id] = value.split(':'); setSessionScope({ type: type as 'project' | 'group', id: Number(id) }) }
+            setSelectedFileIds([])
+          }}>
+            <option value="all">All active projects</option>
+            {groups.map(group => <option value={`group:${group.id}`} key={`group-${group.id}`}>Group · {group.name}</option>)}
+            {projects.filter(project => project.system_key !== 'recycle').map(project => <option value={`project:${project.id}`} key={`project-${project.id}`}>Project · {project.name}</option>)}
+          </select></label>
+          <div><strong>{contextName}</strong>{contextIdea && <small>Idea context: {contextIdea.title}</small>}</div>
+        </div>
+        <p className="agent-privacy-note">{status.privacy}</p>
+        <div className="agent-modes" aria-label="Research mode">{modes.map(item => <button key={item.id} className={mode === item.id ? 'active' : ''} onClick={() => chooseMode(item.id)}>{item.label}</button>)}</div>
         {availableFiles.length > 0 && <details className="agent-files"><summary><Paperclip size={14}/> Include local files <span>{selectedFileIds.length ? `${selectedFileIds.length} selected` : 'none selected'}</span></summary><p>Only checked text files are sent to the provider for this run. Their stable ID and local path are included; binary files contribute metadata only.</p><div>{availableFiles.map(file => <label className={file.exists ? '' : 'missing'} key={file.id}><input type="checkbox" disabled={!file.exists} checked={selectedFileIds.includes(file.id)} onChange={event => setSelectedFileIds(current => event.target.checked ? [...current, file.id] : current.filter(id => id !== file.id))}/><FileText size={14}/><span>{file.display_name}<small title={file.absolute_path}>{file.absolute_path}</small><small>{file.storage_mode === 'managed' ? 'managed copy' : 'linked original'}{!file.exists && ' · missing'}</small></span></label>)}</div></details>}
-        <textarea className="agent-prompt" rows={5} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="What should the research agent investigate?"/>
+        <section className="agent-chat-history" aria-live="polite">
+          {chatMessages.length === 0 ? <div className="agent-chat-welcome"><Sparkles size={19}/><strong>{status.provider_label} is ready</strong><span>Ask a question or describe what you want to work on. The selected project context will be available throughout this chat.</span></div> : chatMessages.map((message, index) => <article className={`agent-chat-message ${message.role}`} key={`${index}-${message.role}`}>
+            <span>{message.role === 'user' ? 'You' : status.provider_label}</span>
+            <div className={message.role === 'assistant' ? 'markdown' : ''}>{message.role === 'assistant' ? <IdeaMarkdown content={message.content} ideas={ideas} attachments={availableFiles} onIdeaSelect={onIdeaSelect} onFileOpen={id => void api.openAttachment(id)}/> : message.content}</div>
+          </article>)}
+          {running && <div className="agent-chat-thinking"><LoaderCircle className="spin" size={16}/> Thinking…</div>}
+          <div className="agent-chat-end" ref={chatEndRef}/>
+        </section>
+        <div className="agent-composer"><textarea className="agent-prompt" rows={3} value={prompt} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void run() } }} placeholder="Message your research agent… (Enter to send, Shift+Enter for a new line)"/><button className="button primary" disabled={running || !prompt.trim()} onClick={() => void run()}>{running ? <LoaderCircle className="spin" size={16}/> : <Send size={16}/>} Send</button></div>
         <div className="agent-options"><label title={status.web_search_supported ? `Use ${status.provider_label}'s server-side web search` : 'This provider preset does not advertise web search'}><input type="checkbox" checked={webSearch} disabled={!status.web_search_supported} onChange={event => setWebSearch(event.target.checked)}/><Globe2 size={15}/> Allow {status.provider_label} web search</label><label>Model {activeProfile?.models.length ? <select value={model} onChange={event => setModel(event.target.value)}>{!activeProfile.models.includes(model) && <option value={model}>{model}</option>}{activeProfile.models.map(item => <option value={item} key={item}>{item}</option>)}</select> : <input value={model} onChange={event => setModel(event.target.value)} />}</label><label>Thinking <select value={reasoningEffort} onChange={event => setReasoningEffort(event.target.value as ReasoningEffort)}>{activeProfile?.reasoning_efforts.map(item => <option value={item} key={item}>{item}</option>)}</select></label></div>
-        <button className="button primary agent-run" disabled={running || !prompt.trim()} onClick={run}>{running ? <><LoaderCircle className="spin" size={17}/> Researching…</> : <><Sparkles size={17}/> Run agent</>}</button>
         </>}
       </>}
       {error && <div className="error-banner agent-error">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}
       {result && <div className="agent-result">
         <div className="agent-result-meta"><span>{result.provider}</span><span>{result.model}</span><span>{result.context_summary.ideas} ideas · {result.context_summary.relations} relations · {result.context_summary.files} files</span><span>Raw captures not shared</span></div>
-        <div className="markdown"><IdeaMarkdown content={result.answer} ideas={ideas} attachments={availableFiles} onIdeaSelect={onIdeaSelect} onFileOpen={id => void api.openAttachment(id)}/></div>
         {contextIdea && resultMode === 'elaborate' && <section className={`agent-save-result ${savedResult ? 'saved' : ''}`}>
           {savedResult ? <><Check size={18}/><div><strong>{savedResult.action === 'create_child' ? 'Saved as a descendant' : 'Original idea updated'}</strong><span>{savedResult.idea.title}</span></div></> : <><div><strong>Save this elaboration</strong><span>Update the current idea, or create a linked child while keeping the original unchanged.</span></div><aside><button className="button secondary small" disabled={savingResult !== null} onClick={() => saveElaboration('update_original')}>{savingResult === 'update_original' ? <LoaderCircle className="spin" size={14}/> : <Save size={14}/>} Update original</button><button className="button primary small" disabled={savingResult !== null} onClick={() => saveElaboration('create_child')}>{savingResult === 'create_child' ? <LoaderCircle className="spin" size={14}/> : <GitBranch size={14}/>} Save as descendant</button></aside></>}
         </section>}

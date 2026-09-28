@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, FileText, GitBranch, Globe2, KeyRound, LoaderCircle, Paperclip, Save, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { Check, Clock3, FileText, GitBranch, Globe2, KeyRound, LoaderCircle, Paperclip, Plus, Save, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { IdeaMarkdown } from './IdeaMarkdown'
-import type { AgentMessage, AgentMode, AgentProposal, AgentProvider, AgentProviderOption, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, Project, ProjectGroup, ReasoningEffort } from '../types'
+import type { AgentChatSession, AgentMessage, AgentMode, AgentProposal, AgentProvider, AgentProviderOption, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, Project, ProjectGroup, ReasoningEffort } from '../types'
 
 type Scope = { type: 'all' } | { type: 'project'; id: number } | { type: 'group'; id: number }
 
@@ -35,6 +35,9 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
   const [mode, setMode] = useState<AgentMode>(contextIdea ? 'elaborate' : 'explore')
   const [prompt, setPrompt] = useState('')
   const [chatMessages, setChatMessages] = useState<AgentMessage[]>([])
+  const [sessions, setSessions] = useState<AgentChatSession[]>([])
+  const [sessionId, setSessionId] = useState<number | null>(null)
+  const [activeIdea, setActiveIdea] = useState<Idea | null>(contextIdea)
   const [sessionScope, setSessionScope] = useState<Scope>(scope.type === 'project' && projects.find(item => item.id === scope.id)?.system_key === 'recycle' ? { type: 'all' } : scope)
   const [model, setModel] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -60,6 +63,25 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [chatMessages, running])
 
   useEffect(() => {
+    let mounted = true
+    api.agentSessions().then(async recent => {
+      if (!mounted) return
+      setSessions(recent)
+      const initial = contextIdea ? recent.find(item => item.idea_id === contextIdea.id) : recent[0]
+      if (!initial) return
+      const details = await api.agentSession(initial.id)
+      if (!mounted) return
+      setSessionId(details.session.id)
+      setChatMessages(details.messages.map(({ role, content }) => ({ role, content })))
+      setSessionScope(details.session.scope_type === 'all' ? { type: 'all' }
+        : details.session.scope_id === null ? { type: 'all' }
+          : { type: details.session.scope_type, id: details.session.scope_id })
+      setActiveIdea(details.session.idea_id === null ? null : ideas.find(item => item.id === details.session.idea_id) ?? null)
+    }).catch(error => setError(error instanceof Error ? error.message : 'Could not load saved agent chats'))
+    return () => { mounted = false }
+  }, [])
+
+  useEffect(() => {
     api.agentStatus().then(value => {
       setStatus(value); setProvider(value.provider); setModel(value.default_model)
       setConnectionModel(value.default_model); setBaseUrl(value.base_url)
@@ -70,27 +92,49 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
 
   useEffect(() => {
     const params = new URLSearchParams()
-    if (contextIdea) params.set('idea_id', String(contextIdea.id))
+    if (activeIdea) params.set('idea_id', String(activeIdea.id))
     else if (sessionScope.type === 'project') params.set('project_id', String(sessionScope.id))
     else if (sessionScope.type === 'group') params.set('group_id', String(sessionScope.id))
     api.attachments(params).then(files => { setAvailableFiles(files); setSelectedFileIds([]) }).catch(() => setAvailableFiles([]))
-  }, [contextIdea?.id, sessionScope.type, sessionScope.type === 'all' ? null : sessionScope.id])
+  }, [activeIdea?.id, sessionScope.type, sessionScope.type === 'all' ? null : sessionScope.id])
 
   const contextName = useMemo(() => {
     const projectContext = sessionScope.type === 'project' ? `Project: ${projects.find(item => item.id === sessionScope.id)?.name ?? 'Unknown'}`
       : sessionScope.type === 'group' ? `Group: ${groups.find(item => item.id === sessionScope.id)?.name ?? 'Unknown'}`
         : 'All active projects'
-    if (contextIdea) return `${projectContext} · ${contextIdea.title}`
+    if (activeIdea) return `${projectContext} · ${activeIdea.title}`
     if (sessionScope.type === 'project') return projectContext
     if (sessionScope.type === 'group') return projectContext
     return 'All active ideas (up to 40 recent ideas)'
-  }, [contextIdea, groups, projects, sessionScope])
+  }, [activeIdea, groups, projects, sessionScope])
 
   const activeProfile = status?.providers.find(item => item.id === provider) ?? null
   const keyReady = Boolean(apiKey.trim() || activeProfile?.configured || !activeProfile?.api_key_required)
 
   function chooseMode(next: AgentMode) {
     setMode(next)
+  }
+
+  async function openSession(id: number) {
+    setError('')
+    try {
+      const details = await api.agentSession(id)
+      setSessionId(details.session.id)
+      setChatMessages(details.messages.map(({ role, content }) => ({ role, content })))
+      setSessionScope(details.session.scope_type === 'all' ? { type: 'all' }
+        : details.session.scope_id === null ? { type: 'all' }
+          : { type: details.session.scope_type, id: details.session.scope_id })
+      setActiveIdea(details.session.idea_id === null ? null : ideas.find(item => item.id === details.session.idea_id) ?? null)
+      setPrompt(''); setResult(null); setSavedResult(null); setResultMode(null)
+    } catch (error) { setError(error instanceof Error ? error.message : 'Could not open that saved chat') }
+  }
+
+  function startNewChat() {
+    setSessionId(null); setChatMessages([]); setPrompt(''); setResult(null); setSavedResult(null); setResultMode(null)
+    setSessionScope(scope.type === 'project' && projects.find(item => item.id === scope.id)?.system_key === 'recycle' ? { type: 'all' } : scope)
+    setActiveIdea(contextIdea)
+    setMode(contextIdea ? 'elaborate' : 'explore')
+    setSelectedFileIds([])
   }
 
   function loadProfile(option: AgentProviderOption, nextStatus?: AgentStatus) {
@@ -116,13 +160,15 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
     setRunning(true); setError(''); setResult(null); setSavedResult(null); setResultMode(null)
     try {
       const next = await api.runAgent({
-        prompt: userMessage, conversation: chatMessages.slice(-12), mode,
+        prompt: userMessage, conversation: chatMessages.slice(-12), session_id: sessionId, mode,
         scope_type: sessionScope.type, scope_id: sessionScope.type === 'all' ? null : sessionScope.id,
-        idea_id: contextIdea?.id ?? null, model, reasoning_effort: reasoningEffort, web_search: webSearch, attachment_ids: selectedFileIds,
+        idea_id: activeIdea?.id ?? null, model, reasoning_effort: reasoningEffort, web_search: webSearch, attachment_ids: selectedFileIds,
       })
       setResult(next); setResultMode(mode)
+      setSessionId(next.session_id ?? null)
       setChatMessages(current => [...current, { role: 'user', content: userMessage }, { role: 'assistant', content: next.answer }])
       setPrompt('')
+      void api.agentSessions().then(setSessions)
     } catch (error) {
       setError(error instanceof Error ? error.message : 'The agent could not complete this request')
     } finally { setRunning(false) }
@@ -156,7 +202,7 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
   }
 
   async function saveElaboration(action: 'update_original' | 'create_child') {
-    if (!result || !contextIdea) return
+    if (!result || !activeIdea) return
     setSavingResult(action); setError('')
     try {
       const saved = await api.saveAgentResult(result.id, action)
@@ -183,6 +229,10 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
             <small><ShieldCheck size={13}/> Keys are never stored in SQLite, browser storage, exports, or the profile file. {!status.credential_store_available && 'Secure OS storage is unavailable, so new keys remain session-only.'}</small>
           </div></div> : <div className="agent-connected"><ShieldCheck size={18}/><div><strong>{status.provider_label} ready</strong><span>{status.default_model} · {status.reasoning_effort} effort · {status.configuration_source === 'secure_storage' ? 'credential remembered' : status.configuration_source === 'session' ? 'session credential' : status.configuration_source === 'environment' ? 'environment credential' : 'local endpoint'}</span><small>{status.base_url}</small></div><button onClick={() => setEditingConnection(true)}>Edit</button><button onClick={() => void forgetConnection()}>Forget</button></div>}
         {status.configured && <>
+        <section className="agent-sessions">
+          <header><div><Clock3 size={14}/><strong>Recent chats</strong></div><button className="button secondary small" onClick={startNewChat}><Plus size={14}/> New chat</button></header>
+          {sessions.length === 0 ? <p>No saved chats yet. Messages are saved automatically.</p> : <div className="agent-session-list">{sessions.map(item => <button key={item.id} className={sessionId === item.id ? 'active' : ''} onClick={() => void openSession(item.id)}><strong>{item.title}</strong><small>{item.message_count} messages · {item.provider}</small></button>)}</div>}
+        </section>
         <div className="agent-session-bar">
           <label><span>Project context</span><select value={sessionScope.type === 'all' ? 'all' : `${sessionScope.type}:${sessionScope.id}`} onChange={event => {
             const value = event.target.value
@@ -194,7 +244,7 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
             {groups.map(group => <option value={`group:${group.id}`} key={`group-${group.id}`}>Group · {group.name}</option>)}
             {projects.filter(project => project.system_key !== 'recycle').map(project => <option value={`project:${project.id}`} key={`project-${project.id}`}>Project · {project.name}</option>)}
           </select></label>
-          <div><strong>{contextName}</strong>{contextIdea && <small>Idea context: {contextIdea.title}</small>}</div>
+          <div><strong>{contextName}</strong>{activeIdea && <small>Idea context: {activeIdea.title}</small>}</div>
         </div>
         <p className="agent-privacy-note">{status.privacy}</p>
         <div className="agent-modes" aria-label="Research mode">{modes.map(item => <button key={item.id} className={mode === item.id ? 'active' : ''} onClick={() => chooseMode(item.id)}>{item.label}</button>)}</div>
@@ -214,7 +264,7 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
       {error && <div className="error-banner agent-error">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}
       {result && <div className="agent-result">
         <div className="agent-result-meta"><span>{result.provider}</span><span>{result.model}</span><span>{result.context_summary.ideas} ideas · {result.context_summary.relations} relations · {result.context_summary.files} files</span><span>Raw captures not shared</span></div>
-        {contextIdea && resultMode === 'elaborate' && <section className={`agent-save-result ${savedResult ? 'saved' : ''}`}>
+        {activeIdea && resultMode === 'elaborate' && <section className={`agent-save-result ${savedResult ? 'saved' : ''}`}>
           {savedResult ? <><Check size={18}/><div><strong>{savedResult.action === 'create_child' ? 'Saved as a descendant' : 'Original idea updated'}</strong><span>{savedResult.idea.title}</span></div></> : <><div><strong>Save this elaboration</strong><span>Update the current idea, or create a linked child while keeping the original unchanged.</span></div><aside><button className="button secondary small" disabled={savingResult !== null} onClick={() => saveElaboration('update_original')}>{savingResult === 'update_original' ? <LoaderCircle className="spin" size={14}/> : <Save size={14}/>} Update original</button><button className="button primary small" disabled={savingResult !== null} onClick={() => saveElaboration('create_child')}>{savingResult === 'create_child' ? <LoaderCircle className="spin" size={14}/> : <GitBranch size={14}/>} Save as descendant</button></aside></>}
         </section>}
         {result.proposals.length > 0 && <section className="agent-proposals"><h3>Suggested changes <span>Review before applying</span></h3>{result.proposals.map(proposal => <article key={proposal.id} className={`agent-proposal ${proposal.status}`}>

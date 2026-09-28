@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentMode, AgentProvider, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, MicroExperiment, Project, ProjectGroup, ReasoningEffort, Relation, ResearchGap, ResearchIntelligenceSettings, ReviewData, SemanticOpportunity, SemanticStatus, SerendipityPair, Status, Suggestion, TagInfo, TagMapData } from './types'
+import type { AgentChatSession, AgentChatSessionDetails, AgentMessage, AgentMode, AgentProvider, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, MicroExperiment, Project, ProjectGroup, ReasoningEffort, Relation, ResearchGap, ResearchIntelligenceSettings, ReviewData, SemanticOpportunity, SemanticStatus, SerendipityPair, Status, Suggestion, TagInfo, TagMapData } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -80,6 +80,8 @@ export const api = {
   activateAgentProvider: (provider: AgentProvider) => request<AgentStatus>(`/agent/activate/${provider}`, { method: 'POST' }),
   forgetAgentProfile: (provider: AgentProvider) => request<AgentStatus>(`/agent/config/${provider}`, { method: 'DELETE' }),
   clearAgentConfig: () => request<AgentStatus>('/agent/config', { method: 'DELETE' }),
+  agentSessions: () => request<AgentChatSession[]>('/agent/sessions'),
+  agentSession: (id: number) => request<AgentChatSessionDetails>(`/agent/sessions/${id}`),
   pickFolder: (initial_path = '') => request<{ path: string }>('/system/pick-folder', { method: 'POST', body: JSON.stringify({ initial_path }) }),
   pickFile: (initial_path = '') => request<{ path: string }>('/system/pick-file', { method: 'POST', body: JSON.stringify({ initial_path }) }),
   attachments: (params = new URLSearchParams()) => request<Attachment[]>(`/attachments?${params}`),
@@ -95,7 +97,7 @@ export const api = {
   detachFile: (ideaId: number, attachmentId: number) => request<void>(`/ideas/${ideaId}/attachments/${attachmentId}`, { method: 'DELETE' }),
   openAttachment: (id: number) => request<{ status: string }>(`/attachments/${id}/open`, { method: 'POST' }),
   revealAttachment: (id: number) => request<{ status: string }>(`/attachments/${id}/reveal`, { method: 'POST' }),
-  runAgent: (data: { prompt: string; conversation: AgentMessage[]; mode: AgentMode; scope_type: 'all' | 'project' | 'group'; scope_id: number | null; idea_id: number | null; model: string; reasoning_effort: ReasoningEffort; web_search: boolean; attachment_ids: number[] }) =>
+  runAgent: (data: { prompt: string; conversation: AgentMessage[]; session_id: number | null; mode: AgentMode; scope_type: 'all' | 'project' | 'group'; scope_id: number | null; idea_id: number | null; model: string; reasoning_effort: ReasoningEffort; web_search: boolean; attachment_ids: number[] }) =>
     request<AgentRunResult>('/agent/runs', { method: 'POST', body: JSON.stringify(data) }),
   dream: (data: { idea_ids: number[]; prompt: string; project_id: number; model: string }) =>
     request<AgentRunResult>('/dreams', { method: 'POST', body: JSON.stringify(data) }),

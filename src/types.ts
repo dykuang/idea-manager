@@ -126,6 +126,7 @@ export interface AgentProposal {
 
 export interface AgentRunResult {
   id: number
+  session_id?: number
   provider: string
   model: string
   answer: string
@@ -136,6 +137,24 @@ export interface AgentRunResult {
 export interface AgentMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+export interface AgentChatSession {
+  id: number
+  title: string
+  provider: string
+  model: string
+  scope_type: 'all' | 'project' | 'group'
+  scope_id: number | null
+  idea_id: number | null
+  created_at: string
+  updated_at: string
+  message_count: number
+}
+
+export interface AgentChatSessionDetails {
+  session: AgentChatSession
+  messages: (AgentMessage & { created_at: string })[]
 }
 
 export interface AgentRunSaveResult {

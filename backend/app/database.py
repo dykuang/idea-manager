@@ -129,6 +129,30 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS agent_chat_sessions (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT 'New chat',
+    provider TEXT NOT NULL DEFAULT 'openai',
+    model TEXT NOT NULL DEFAULT '',
+    scope_type TEXT NOT NULL DEFAULT 'all' CHECK(scope_type IN ('all', 'project', 'group')),
+    scope_id INTEGER,
+    idea_id INTEGER REFERENCES ideas(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS agent_chat_messages (
+    id INTEGER PRIMARY KEY,
+    session_id INTEGER NOT NULL REFERENCES agent_chat_sessions(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    run_id INTEGER REFERENCES agent_runs(id) ON DELETE SET NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_chat_sessions_updated ON agent_chat_sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_session ON agent_chat_messages(session_id, id);
+
 CREATE TABLE IF NOT EXISTS agent_proposals (
     id INTEGER PRIMARY KEY,
     run_id INTEGER NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
@@ -381,6 +405,29 @@ def init_db() -> None:
         default_id = connection.execute("SELECT id FROM projects WHERE system_key='random_chat'").fetchone()["id"]
         connection.execute("UPDATE ideas SET project_id=? WHERE project_id IS NULL", (default_id,))
         connection.execute("DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM idea_tags WHERE idea_tags.tag_id=tags.id)")
+        legacy_runs = connection.execute(
+            """SELECT r.* FROM agent_runs r
+               WHERE r.mode IN ('explore', 'elaborate', 'critique', 'connect', 'synthesize')
+                 AND NOT EXISTS (SELECT 1 FROM agent_chat_messages m WHERE m.run_id=r.id)
+               ORDER BY r.id"""
+        ).fetchall()
+        for run in legacy_runs:
+            title = " ".join(str(run["prompt"]).split())[:80] or "Previous agent chat"
+            session_cursor = connection.execute(
+                """INSERT INTO agent_chat_sessions(title, provider, model, scope_type, scope_id, idea_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (title, run["provider"], run["model"], run["scope_type"], run["scope_id"], run["idea_id"], run["created_at"], run["created_at"]),
+            )
+            session_id = int(session_cursor.lastrowid)
+            connection.execute(
+                "INSERT INTO agent_chat_messages(session_id, role, content, created_at) VALUES (?, 'user', ?, ?)",
+                (session_id, run["prompt"], run["created_at"]),
+            )
+            connection.execute(
+                """INSERT INTO agent_chat_messages(session_id, role, content, run_id, created_at)
+                   VALUES (?, 'assistant', ?, ?, ?)""",
+                (session_id, run["response_text"], run["id"], run["created_at"]),
+            )
 
 
 @contextmanager

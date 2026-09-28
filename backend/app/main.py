@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from .agent_profiles import CredentialStoreError, credential_store_available, delete_api_key, get_api_key, load_store, reset_profile, save_api_key, save_profile, set_active_provider
+from .agent_sessions import router as agent_sessions_router, save_chat_turn
 from .database import DB_PATH, db, init_db
 from .experiments import router as experiments_router
 from .research_insights import router as research_insights_router
@@ -541,6 +542,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="IdeaMiner API", version="0.1.0", lifespan=lifespan)
+app.include_router(agent_sessions_router)
 app.include_router(experiments_router)
 app.include_router(research_insights_router)
 app.include_router(serendipity_router)
@@ -817,8 +819,20 @@ async def run_agent(payload: AgentRunRequest) -> dict[str, Any]:
                 "id": proposal_cursor.lastrowid, "run_id": run_id, "action_type": action,
                 "title": title, "rationale": rationale, "payload": proposal_payload, "status": "pending",
             })
+        session_id = save_chat_turn(
+            connection,
+            session_id=payload.session_id,
+            run_id=int(run_id),
+            prompt=payload.prompt,
+            answer=answer,
+            provider=provider,
+            model=model,
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            idea_id=payload.idea_id,
+        )
     return {
-        "id": run_id, "provider": provider, "model": model, "answer": answer,
+        "id": run_id, "session_id": session_id, "provider": provider, "model": model, "answer": answer,
         "proposals": proposals,
         "context_summary": {"ideas": len(context["ideas"]), "relations": len(context["relations"]), "files": len(context["files"]), "raw_text_shared": False},
     }

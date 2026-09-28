@@ -91,6 +91,7 @@ class AgentRunRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: Literal["explore", "elaborate", "critique", "connect", "synthesize"] = "explore"
     conversation: list[AgentMessage] = Field(default_factory=list, max_length=12)
+    session_id: int | None = None
     scope_type: Literal["all", "project", "group"] = "all"
     scope_id: int | None = None
     idea_id: int | None = None

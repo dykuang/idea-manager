@@ -26,6 +26,8 @@ For example: capture “Could prediction change with temporal scale?”, grow se
 - FTS5 keyword search, filters, related-idea suggestions, graph view, and lineage tracking
 - Scalable Focus browser with a compact navigator, stable reading pane, density control, and keyboard navigation
 - Local-file references that store paths and metadata without embedding file contents
+- Figure galleries with captions, ordering, and a per-idea cover image
+- Clipboard paste and drag/drop for local PNG, JPEG, WebP, GIF, and SVG figures
 - JSON import/export and Markdown export
 - Weekly review, local semantic discovery, and cross-project Dream synthesis
 - Optional Agent workspace with separate OpenAI, Anthropic, DeepSeek, Qwen, and local profiles
@@ -86,6 +88,12 @@ IdeaMiner automatically creates `data/ideaminer.db` on first launch, including t
 Never commit the `data` directory contents: they can contain idea text, agent history, file paths, and other private research material. The repository intentionally includes only `data/.gitkeep`.
 
 For backups, stop IdeaMiner and copy `data/ideaminer.db` somewhere safe. For sharing selected knowledge with another IdeaMiner user, use **Export → JSON** and let the recipient use **Import**.
+
+### Research figures
+
+Open an idea to add a figure with **Add figures**, drag image files onto its Figures area, or copy an image and press **Ctrl+V** (or **Cmd+V**) while the idea is open. PNG, JPEG, WebP, GIF, and SVG files are supported. Add captions, reorder figures, and choose one cover figure; collapsed cards show a small figure count.
+
+Pasted and uploaded images are copied into the local `data/assets/ideas/` directory (next to `data/ideaminer.db`); they are not sent to a cloud service or an Agent automatically. Existing linked files continue to point to their original location, and detaching any file does not delete it. Back up `data/assets/` along with `data/ideaminer.db` to preserve internally stored figures. The assets folder is ignored by Git.
 
 ## Agent connections
 

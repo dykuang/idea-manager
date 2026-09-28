@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -14,7 +15,9 @@ os.environ.pop("IDEAMINER_AGENT_BASE_URL", None)
 
 from fastapi.testclient import TestClient
 from backend.app.database import db
+from backend.app import database as database_module
 from backend.app.main import _agent_context, app
+from backend.app import main as main_module
 from backend.app.schemas import AgentRunRequest
 from backend.app.mcp_server import (
     copy_idea as mcp_copy_idea,
@@ -392,6 +395,78 @@ def test_project_workspaces_and_attachments():
         assert copied.status_code == 201
         assert copied.json()["storage_mode"] == "managed"
         assert Path(copied.json()["absolute_path"]).is_file()
+
+
+def test_figure_metadata_upload_preview_cover_and_export(tmp_path, monkeypatch):
+    database_path = tmp_path / "ideaminer.db"
+    monkeypatch.setattr(database_module, "DB_PATH", database_path)
+    monkeypatch.setattr(main_module, "DB_PATH", database_path)
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000b49444154789c636000020000050001a5f645400000000049454e44ae426082")
+    with TestClient(app) as client:
+        idea = client.post("/api/ideas", json={"title": "Figure test", "raw_text": "Verbatim capture"}).json()
+        first = client.post(f"/api/ideas/{idea['id']}/figures", files={"file": ("plot.png", png, "image/png")})
+        assert first.status_code == 201, first.text
+        first_id = first.json()["id"]
+        updated = client.patch(f"/api/ideas/{idea['id']}/attachments/{first_id}", json={
+            "caption": "Temporal effect plot", "is_cover": True,
+        })
+        assert updated.status_code == 200
+        assert updated.json()["is_cover"] is True
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"><rect width="2" height="1" fill="green"/></svg>'
+        second = client.post(f"/api/ideas/{idea['id']}/figures", files={"file": ("diagram.svg", svg, "image/svg+xml")})
+        assert second.status_code == 201, second.text
+        second_id = second.json()["id"]
+        assert client.patch(f"/api/ideas/{idea['id']}/attachments/{second_id}", json={"is_cover": True, "caption": "Diagram cover"}).json()["is_cover"] is True
+        figures = client.get(f"/api/ideas/{idea['id']}").json()["attachments"]
+        assert sum(item["is_cover"] for item in figures) == 1
+        assert next(item for item in figures if item["id"] == first_id)["is_cover"] is False
+
+        preview = client.get(f"/api/attachments/{second_id}/content")
+        assert preview.status_code == 200
+        assert preview.content == svg
+        assert preview.headers["content-type"].startswith("image/svg+xml")
+        assert preview.headers["x-content-type-options"] == "nosniff"
+        assert "sandbox" in preview.headers["content-security-policy"]
+        assert client.get("/api/attachments/999999/content").status_code == 404
+        export = client.get("/api/export/json").json()
+        assert export["ideas"][0]["figure_assets"][0]["content_hash"]
+        imported = client.post("/api/import/json", json={
+            "data": export, "duplicate_strategy": "copy", "project_strategy": "merge",
+        })
+        assert imported.status_code == 200, imported.text
+        copies = [item for item in client.get("/api/ideas").json() if item["title"] == "Figure test"]
+        assert len(copies) == 2
+        copied_id = next(item["id"] for item in copies if item["id"] != idea["id"])
+        copied_figures = client.get(f"/api/ideas/{copied_id}").json()["attachments"]
+        assert len([item for item in copied_figures if item["asset_role"] == "figure"]) == 2
+        assert next(item for item in copied_figures if item["is_cover"])["caption"] == "Diagram cover"
+        assert client.post(f"/api/ideas/{idea['id']}/figures", files={
+            "file": ("bad.svg", b'<svg><script>alert(1)</script></svg>', "image/svg+xml"),
+        }).status_code == 400
+
+
+def test_figure_association_migration_is_idempotent(tmp_path, monkeypatch):
+    database_path = tmp_path / "legacy.db"
+    monkeypatch.setattr(database_module, "DB_PATH", database_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript("""
+            CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE, description TEXT NOT NULL DEFAULT '', group_id INTEGER, workspace_mode TEXT NOT NULL DEFAULT 'library', workspace_path TEXT NOT NULL DEFAULT '', system_key TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT '');
+            CREATE TABLE ideas (id INTEGER PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', raw_text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'seed', project_id INTEGER, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
+            CREATE TABLE attachments (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, display_name TEXT NOT NULL, path TEXT NOT NULL, storage_mode TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT '', size_bytes INTEGER NOT NULL DEFAULT 0, modified_at REAL, content_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '');
+            CREATE TABLE idea_attachments (idea_id INTEGER NOT NULL, attachment_id INTEGER NOT NULL, PRIMARY KEY (idea_id, attachment_id));
+            INSERT INTO projects(id, name) VALUES (1, 'Legacy');
+            INSERT INTO ideas(id, title, raw_text, project_id) VALUES (1, 'Legacy idea', 'original', 1);
+            INSERT INTO attachments(id, project_id, display_name, path, storage_mode) VALUES (1, 1, 'notes.txt', 'notes.txt', 'linked');
+            INSERT INTO idea_attachments(idea_id, attachment_id) VALUES (1, 1);
+        """)
+    database_module.init_db()
+    database_module.init_db()
+    with sqlite3.connect(database_path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(idea_attachments)")}
+        row = connection.execute("SELECT asset_role, caption, sort_order, is_cover FROM idea_attachments WHERE idea_id=1 AND attachment_id=1").fetchone()
+    assert {"asset_role", "caption", "sort_order", "is_cover"}.issubset(columns)
+    assert row == ("attachment", "", 0, 0)
 
 
 def test_codex_mcp_bridge_and_external_revision():

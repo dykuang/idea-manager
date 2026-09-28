@@ -14,7 +14,7 @@ export function AttachmentPanel({ idea, project, onChanged }: {
   project?: Project
   onChanged: () => Promise<void>
 }) {
-  const files = idea.attachments ?? []
+  const files = (idea.attachments ?? []).filter(file => file.asset_role !== 'figure')
   const [path, setPath] = useState('')
   const [mode, setMode] = useState<'linked' | 'managed'>(project?.workspace_mode === 'managed' ? 'managed' : 'linked')
   const [busy, setBusy] = useState(false)

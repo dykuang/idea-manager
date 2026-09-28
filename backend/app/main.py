@@ -10,19 +10,20 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Response
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from .agent_profiles import CredentialStoreError, credential_store_available, delete_api_key, get_api_key, load_store, reset_profile, save_api_key, save_profile, set_active_provider
-from .database import db, init_db
-from .schemas import AgentConnectionCreate, AgentProposalResolution, AgentResultSave, AgentRunRequest, AttachmentCreate, CodexCheckpointCreate, DreamRunRequest, ImportPreviewRequest, ImportRequest, IdeaCreate, IdeaUpdate, PathChoice, ProjectAssignment, ProjectCreate, ProjectGroupCreate, RelationCreate, TagBulkUpdate, TagMerge, TagRename, TagSettingsUpdate
+from .database import DB_PATH, db, init_db
+from .schemas import AgentConnectionCreate, AgentProposalResolution, AgentResultSave, AgentRunRequest, AttachmentCreate, CodexCheckpointCreate, DreamRunRequest, ImportPreviewRequest, ImportRequest, IdeaAttachmentUpdate, IdeaCreate, IdeaUpdate, PathChoice, ProjectAssignment, ProjectCreate, ProjectGroupCreate, RelationCreate, TagBulkUpdate, TagMerge, TagRename, TagSettingsUpdate
 from .semantic import DIMENSIONS as SEMANTIC_DIMENSIONS, MODEL as SEMANTIC_MODEL, rebuild as rebuild_semantic_index, similarity as semantic_similarity
 
 
@@ -37,6 +38,9 @@ def _tags(connection: sqlite3.Connection, idea_id: int) -> list[str]:
 def _idea(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     result = dict(row)
     result["tags"] = _tags(connection, row["id"])
+    result["figure_count"] = connection.execute(
+        "SELECT COUNT(*) FROM idea_attachments WHERE idea_id=? AND asset_role='figure'", (row["id"],)
+    ).fetchone()[0]
     return result
 
 
@@ -71,26 +75,37 @@ def _file_hash(path: Path) -> str:
 def _resolved_attachment_path(row: sqlite3.Row) -> Path:
     path = Path(row["path"])
     if row["storage_mode"] == "managed":
-        path = Path(row["workspace_path"]) / path
+        if path.as_posix().startswith("assets/"):
+            path = DB_PATH.parent / path
+        else:
+            path = Path(row["workspace_path"]) / path
     return path.resolve()
 
 
 def _attachment(row: sqlite3.Row) -> dict[str, Any]:
     path = _resolved_attachment_path(row)
-    return {
+    result = {
         "id": row["id"], "project_id": row["project_id"], "display_name": row["display_name"],
         "storage_mode": row["storage_mode"], "mime_type": row["mime_type"],
         "size_bytes": row["size_bytes"], "content_hash": row["content_hash"],
         "created_at": row["created_at"], "absolute_path": str(path), "exists": path.is_file(),
     }
+    if "asset_role" in row.keys():
+        result.update({
+            "asset_role": row["asset_role"], "caption": row["caption"],
+            "sort_order": row["sort_order"], "is_cover": bool(row["is_cover"]),
+            "preview_url": f"/api/attachments/{row['id']}/content" if row["asset_role"] == "figure" else None,
+        })
+    return result
 
 
 def _attachment_rows(connection: sqlite3.Connection, where: str, params: list[Any]) -> list[dict[str, Any]]:
     rows = connection.execute(
-        f"""SELECT DISTINCT a.*, p.workspace_path FROM attachments a
+        f"""SELECT DISTINCT a.*, p.workspace_path, ia.asset_role, ia.caption, ia.sort_order, ia.is_cover FROM attachments a
             JOIN projects p ON p.id=a.project_id
             JOIN idea_attachments ia ON ia.attachment_id=a.id
-            JOIN ideas i ON i.id=ia.idea_id WHERE {where} ORDER BY a.display_name COLLATE NOCASE""",
+            JOIN ideas i ON i.id=ia.idea_id WHERE {where}
+            ORDER BY CASE ia.asset_role WHEN 'figure' THEN 0 ELSE 1 END, ia.sort_order, a.display_name COLLATE NOCASE""",
         params,
     ).fetchall()
     return [_attachment(row) for row in rows]
@@ -1191,7 +1206,8 @@ def copy_idea(idea_id: int, payload: ProjectAssignment) -> dict[str, Any]:
             (new_id, idea_id),
         )
         connection.execute(
-            "INSERT INTO idea_attachments(idea_id, attachment_id) SELECT ?, attachment_id FROM idea_attachments WHERE idea_id=?",
+            """INSERT INTO idea_attachments(idea_id, attachment_id, asset_role, caption, sort_order, is_cover)
+               SELECT ?, attachment_id, asset_role, caption, sort_order, is_cover FROM idea_attachments WHERE idea_id=?""",
             (new_id, idea_id),
         )
         row = connection.execute("SELECT * FROM ideas WHERE id=?", (new_id,)).fetchone()
@@ -1320,6 +1336,153 @@ def attach_file(idea_id: int, payload: AttachmentCreate) -> dict[str, Any]:
             (attachment_id,),
         ).fetchone()
         return _attachment(row)
+
+
+FIGURE_TYPES = {
+    ".png": ("image/png", "png"), ".jpg": ("image/jpeg", "jpg"), ".jpeg": ("image/jpeg", "jpg"),
+    ".webp": ("image/webp", "webp"), ".gif": ("image/gif", "gif"), ".svg": ("image/svg+xml", "svg"),
+}
+MAX_FIGURE_BYTES = 20 * 1024 * 1024
+
+
+@app.post("/api/ideas/{idea_id}/figures", status_code=201)
+async def upload_figure(idea_id: int, file: UploadFile = File(...)) -> dict[str, Any]:
+    display_name = Path(file.filename or "figure").name
+    suffix = Path(display_name).suffix.lower()
+    figure_type = FIGURE_TYPES.get(suffix)
+    if not figure_type:
+        raise HTTPException(415, "Supported image types are PNG, JPEG, WebP, GIF, and SVG")
+    content = await file.read(MAX_FIGURE_BYTES + 1)
+    if not content:
+        raise HTTPException(400, "The image file is empty")
+    if len(content) > MAX_FIGURE_BYTES:
+        raise HTTPException(413, "Images must be 20 MB or smaller")
+    mime_type, extension = figure_type
+    signatures = {
+        "png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+        "jpg": content.startswith(b"\xff\xd8\xff"),
+        "webp": content.startswith(b"RIFF") and content[8:12] == b"WEBP",
+        "gif": content.startswith((b"GIF87a", b"GIF89a")),
+    }
+    if extension != "svg" and not signatures.get(extension, False):
+        raise HTTPException(400, "The file contents do not match the selected image type")
+    if extension == "svg":
+        if b"<!DOCTYPE" in content.upper() or b"<!ENTITY" in content.upper():
+            raise HTTPException(400, "SVG document types and entities are not supported")
+        try:
+            root = ET.fromstring(content)
+            if root.tag.rsplit("}", 1)[-1].lower() != "svg":
+                raise ValueError("Not an SVG document")
+            for element in root.iter():
+                tag = element.tag.rsplit("}", 1)[-1].lower()
+                if tag in {"script", "foreignobject"}:
+                    raise ValueError("Active SVG element")
+                text_value = (element.text or "").lower()
+                if tag == "style" and ("@import" in text_value or re.search(r"url\(\s*(['\"]?)(?!#)", text_value)):
+                    raise ValueError("External SVG style reference")
+                for key, value in element.attrib.items():
+                    name = key.rsplit("}", 1)[-1].lower()
+                    normalized = value.strip().lower()
+                    if name.startswith("on") or (name in {"href", "src"} and normalized and not normalized.startswith("#")):
+                        raise ValueError("Active or external SVG reference")
+                    if "@import" in normalized or re.search(r"url\(\s*(['\"]?)(?!#)", normalized):
+                        raise ValueError("External SVG style reference")
+        except (ET.ParseError, ValueError) as error:
+            raise HTTPException(400, "This SVG is malformed or contains active content") from error
+
+    with db() as connection:
+        idea = connection.execute(
+            "SELECT i.id, i.project_id, p.workspace_mode, p.system_key FROM ideas i JOIN projects p ON p.id=i.project_id WHERE i.id=?",
+            (idea_id,),
+        ).fetchone()
+        if not idea:
+            raise HTTPException(404, "Idea not found")
+        if idea["system_key"] == "recycle":
+            raise HTTPException(409, "Restore this idea before adding figures")
+        folder = DB_PATH.parent / "assets" / "ideas" / str(idea_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.{extension}"
+        destination = folder / filename
+        destination.write_bytes(content)
+        relative_path = (Path("assets") / "ideas" / str(idea_id) / filename).as_posix()
+        digest = hashlib.sha256(content).hexdigest()
+        connection.execute(
+            "INSERT INTO attachments(project_id, display_name, path, storage_mode, mime_type, size_bytes, content_hash) VALUES (?, ?, ?, 'managed', ?, ?, ?)",
+            (idea["project_id"], display_name or f"figure.{extension}", relative_path, mime_type, len(content), digest),
+        )
+        attachment_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+        order = connection.execute("SELECT COALESCE(MAX(sort_order), -1)+1 FROM idea_attachments WHERE idea_id=? AND asset_role='figure'", (idea_id,)).fetchone()[0]
+        connection.execute(
+            "INSERT INTO idea_attachments(idea_id, attachment_id, asset_role, sort_order) VALUES (?, ?, 'figure', ?)",
+            (idea_id, attachment_id, order),
+        )
+        row = connection.execute(
+            "SELECT a.*, p.workspace_path, ia.asset_role, ia.caption, ia.sort_order, ia.is_cover FROM attachments a JOIN projects p ON p.id=a.project_id JOIN idea_attachments ia ON ia.attachment_id=a.id WHERE a.id=? AND ia.idea_id=?",
+            (attachment_id, idea_id),
+        ).fetchone()
+        return _attachment(row)
+
+
+@app.patch("/api/ideas/{idea_id}/attachments/{attachment_id}")
+def update_idea_attachment(idea_id: int, attachment_id: int, payload: IdeaAttachmentUpdate) -> dict[str, Any]:
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(400, "Provide figure metadata to update")
+    with db() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT a.*, p.workspace_path, ia.asset_role, ia.caption, ia.sort_order, ia.is_cover FROM attachments a JOIN projects p ON p.id=a.project_id JOIN idea_attachments ia ON ia.attachment_id=a.id WHERE ia.idea_id=? AND ia.attachment_id=?",
+            (idea_id, attachment_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Attachment link not found")
+        role = changes.get("asset_role", row["asset_role"])
+        is_cover = changes.get("is_cover", bool(row["is_cover"]))
+        if role == "figure" and row["mime_type"] not in {value[0] for value in FIGURE_TYPES.values()}:
+            raise HTTPException(400, "Only supported image attachments can be figures")
+        if is_cover and role != "figure":
+            raise HTTPException(400, "Only figures can be used as a cover")
+        if is_cover and row["mime_type"] not in {value[0] for value in FIGURE_TYPES.values()}:
+            raise HTTPException(400, "Only image attachments can be used as a cover")
+        if is_cover:
+            connection.execute("UPDATE idea_attachments SET is_cover=0 WHERE idea_id=? AND is_cover=1", (idea_id,))
+        if role != "figure":
+            changes["is_cover"] = False
+        assignments = ", ".join(f"{key}=?" for key in changes)
+        connection.execute(
+            f"UPDATE idea_attachments SET {assignments} WHERE idea_id=? AND attachment_id=?",
+            (*changes.values(), idea_id, attachment_id),
+        )
+        updated = connection.execute(
+            "SELECT a.*, p.workspace_path, ia.asset_role, ia.caption, ia.sort_order, ia.is_cover FROM attachments a JOIN projects p ON p.id=a.project_id JOIN idea_attachments ia ON ia.attachment_id=a.id WHERE ia.idea_id=? AND ia.attachment_id=?",
+            (idea_id, attachment_id),
+        ).fetchone()
+        return _attachment(updated)
+
+
+@app.get("/api/attachments/{attachment_id}/content")
+def attachment_content(attachment_id: int) -> FileResponse:
+    with db() as connection:
+        row = connection.execute(
+            "SELECT a.*, p.workspace_path FROM attachments a JOIN projects p ON p.id=a.project_id WHERE a.id=?",
+            (attachment_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Attachment not found")
+        path = _resolved_attachment_path(row)
+        if not path.is_file():
+            raise HTTPException(404, "The attached file is missing")
+        mime_type = row["mime_type"]
+        if mime_type not in {value[0] for value in FIGURE_TYPES.values()}:
+            raise HTTPException(415, "This attachment is not a supported image")
+    return FileResponse(
+        path, media_type=mime_type, filename=None,
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        },
+    )
 
 
 @app.delete("/api/ideas/{idea_id}/attachments/{attachment_id}", status_code=204)
@@ -1650,10 +1813,17 @@ def suggestions(idea_id: int, limit: int = Query(default=5, ge=1, le=20)) -> lis
 def _export_data() -> dict[str, Any]:
     with db() as connection:
         ideas = [_idea(connection, row) for row in connection.execute("SELECT * FROM ideas ORDER BY created_at").fetchall()]
+        for idea in ideas:
+            idea["figure_assets"] = [{**dict(row), "is_cover": bool(row["is_cover"])} for row in connection.execute(
+                """SELECT a.content_hash, a.display_name, a.mime_type, ia.asset_role, ia.caption, ia.sort_order, ia.is_cover
+                   FROM idea_attachments ia JOIN attachments a ON a.id=ia.attachment_id
+                   WHERE ia.idea_id=? AND ia.asset_role='figure' ORDER BY ia.sort_order, a.id""",
+                (idea["id"],),
+            ).fetchall()]
         relations = [dict(row) for row in connection.execute("SELECT * FROM relations ORDER BY created_at").fetchall()]
         projects = [dict(row) for row in connection.execute("SELECT * FROM projects ORDER BY id").fetchall()]
         groups = [dict(row) for row in connection.execute("SELECT * FROM project_groups ORDER BY id").fetchall()]
-    return {"version": 2, "project_groups": groups, "projects": projects, "ideas": ideas, "relations": relations}
+    return {"version": 3, "project_groups": groups, "projects": projects, "ideas": ideas, "relations": relations}
 
 
 def _expand_export_references(text: str, by_id: dict[int, dict[str, Any]]) -> str:
@@ -1678,7 +1848,7 @@ def _expand_export_references(text: str, by_id: dict[int, dict[str, Any]]) -> st
 
 def _validated_import(data: dict[str, Any]) -> dict[str, Any]:
     version = data.get("version", 1)
-    if version not in (1, 2):
+    if version not in (1, 2, 3):
         raise HTTPException(400, f"Unsupported IdeaMiner export version: {version}")
     for key in ("ideas", "relations"):
         if not isinstance(data.get(key, []), list):
@@ -1706,6 +1876,19 @@ def _validated_import(data: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(400, f"Idea {idea_id} has an invalid status")
         if not isinstance(idea.get("tags", []), list) or not all(isinstance(tag, str) for tag in idea.get("tags", [])):
             raise HTTPException(400, f"Idea {idea_id} has invalid tags")
+        if not isinstance(idea.get("figure_assets", []), list):
+            raise HTTPException(400, f"Idea {idea_id} has invalid figure metadata")
+        for figure in idea.get("figure_assets", []):
+            if not isinstance(figure, dict):
+                raise HTTPException(400, f"Idea {idea_id} has invalid figure metadata")
+            if figure.get("asset_role", "figure") not in ("attachment", "figure"):
+                raise HTTPException(400, f"Idea {idea_id} has an invalid figure role")
+            if not isinstance(figure.get("content_hash", ""), str) or not isinstance(figure.get("caption", ""), str) or len(figure.get("caption", "")) > 500:
+                raise HTTPException(400, f"Idea {idea_id} has invalid figure metadata")
+            if not isinstance(figure.get("sort_order", 0), int) or not 0 <= figure.get("sort_order", 0) <= 100000:
+                raise HTTPException(400, f"Idea {idea_id} has invalid figure ordering")
+            if not isinstance(figure.get("is_cover", False), bool):
+                raise HTTPException(400, f"Idea {idea_id} has invalid cover metadata")
     return {
         "version": version,
         "project_groups": data.get("project_groups", []),
@@ -1854,6 +2037,30 @@ def import_json(payload: ImportRequest) -> dict[str, Any]:
                 result["ideas_created"] += 1
             _set_tags(connection, new_id, idea.get("tags", []))
             idea_map[old_id] = new_id
+
+        for idea in data["ideas"]:
+            new_id = idea_map.get(int(idea["id"]))
+            if not new_id:
+                continue
+            project_row = connection.execute("SELECT project_id FROM ideas WHERE id=?", (new_id,)).fetchone()
+            for figure in idea.get("figure_assets", []):
+                if not isinstance(figure, dict) or not isinstance(figure.get("content_hash"), str):
+                    continue
+                attachment = connection.execute(
+                    "SELECT id FROM attachments WHERE project_id=? AND content_hash=? AND mime_type LIKE 'image/%' ORDER BY id LIMIT 1",
+                    (project_row["project_id"], figure["content_hash"]),
+                ).fetchone()
+                if not attachment:
+                    continue
+                role = "figure" if figure.get("asset_role") == "figure" else "attachment"
+                connection.execute(
+                    """INSERT OR IGNORE INTO idea_attachments(idea_id, attachment_id, asset_role, caption, sort_order)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (new_id, attachment["id"], role, str(figure.get("caption", ""))[:500], max(0, int(figure.get("sort_order", 0) or 0))),
+                )
+                if role == "figure" and figure.get("is_cover"):
+                    connection.execute("UPDATE idea_attachments SET is_cover=0 WHERE idea_id=? AND is_cover=1", (new_id,))
+                    connection.execute("UPDATE idea_attachments SET is_cover=1 WHERE idea_id=? AND attachment_id=?", (new_id, attachment["id"]))
 
         for relation in data["relations"]:
             if not isinstance(relation, dict):

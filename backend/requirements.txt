@@ -7,3 +7,4 @@ keyring==25.7.0
 mcp==1.30.0
 starlette==0.41.3
 sse-starlette==2.2.1
+python-multipart==0.0.20

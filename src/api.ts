@@ -73,6 +73,14 @@ export const api = {
   pickFile: (initial_path = '') => request<{ path: string }>('/system/pick-file', { method: 'POST', body: JSON.stringify({ initial_path }) }),
   attachments: (params = new URLSearchParams()) => request<Attachment[]>(`/attachments?${params}`),
   attachFile: (ideaId: number, path: string, storage_mode: 'linked' | 'managed') => request<Attachment>(`/ideas/${ideaId}/attachments`, { method: 'POST', body: JSON.stringify({ path, storage_mode }) }),
+  uploadFigure: async (ideaId: number, file: File) => {
+    const form = new FormData(); form.append('file', file)
+    const response = await fetch(`/api/ideas/${ideaId}/figures`, { method: 'POST', body: form })
+    if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.detail || `Upload failed (${response.status})`) }
+    return response.json() as Promise<Attachment>
+  },
+  updateIdeaAttachment: (ideaId: number, attachmentId: number, data: Partial<Pick<Attachment, 'asset_role' | 'caption' | 'sort_order' | 'is_cover'>>) =>
+    request<Attachment>(`/ideas/${ideaId}/attachments/${attachmentId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   detachFile: (ideaId: number, attachmentId: number) => request<void>(`/ideas/${ideaId}/attachments/${attachmentId}`, { method: 'DELETE' }),
   openAttachment: (id: number) => request<{ status: string }>(`/attachments/${id}/open`, { method: 'POST' }),
   revealAttachment: (id: number) => request<{ status: string }>(`/attachments/${id}/reveal`, { method: 'POST' }),

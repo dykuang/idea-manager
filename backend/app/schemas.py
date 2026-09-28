@@ -151,6 +151,13 @@ class AttachmentCreate(BaseModel):
     storage_mode: Literal["linked", "managed"] = "linked"
 
 
+class IdeaAttachmentUpdate(BaseModel):
+    asset_role: Literal["attachment", "figure"] | None = None
+    caption: str | None = Field(default=None, max_length=500)
+    sort_order: int | None = Field(default=None, ge=0, le=100000)
+    is_cover: bool | None = None
+
+
 class PathChoice(BaseModel):
     initial_path: str = Field(default="", max_length=2000)
 

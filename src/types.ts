@@ -11,6 +11,7 @@ export interface Idea {
   updated_at: string
   project_id: number
   attachments?: Attachment[]
+  figure_count?: number
 }
 
 export interface Attachment {
@@ -24,6 +25,11 @@ export interface Attachment {
   created_at: string
   absolute_path: string
   exists: boolean
+  asset_role?: 'attachment' | 'figure'
+  caption?: string
+  sort_order?: number
+  is_cover?: boolean
+  preview_url?: string | null
 }
 
 export interface ProjectGroup {

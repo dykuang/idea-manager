@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE TABLE IF NOT EXISTS idea_attachments (
     idea_id INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
     attachment_id INTEGER NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+    asset_role TEXT NOT NULL DEFAULT 'attachment' CHECK(asset_role IN ('attachment', 'figure')),
+    caption TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_cover INTEGER NOT NULL DEFAULT 0 CHECK(is_cover IN (0, 1)),
     PRIMARY KEY (idea_id, attachment_id)
 );
 
@@ -223,6 +227,9 @@ END;
 CREATE TRIGGER IF NOT EXISTS library_idea_attachments_ad AFTER DELETE ON idea_attachments BEGIN
     UPDATE library_state SET revision=revision+1 WHERE id=1;
 END;
+CREATE TRIGGER IF NOT EXISTS library_idea_attachments_au AFTER UPDATE ON idea_attachments BEGIN
+    UPDATE library_state SET revision=revision+1 WHERE id=1;
+END;
 CREATE TRIGGER IF NOT EXISTS library_projects_ai AFTER INSERT ON projects BEGIN
     UPDATE library_state SET revision=revision+1 WHERE id=1;
 END;
@@ -275,6 +282,17 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as connection:
         connection.executescript(SCHEMA)
+        attachment_columns = {row["name"] for row in connection.execute("PRAGMA table_info(idea_attachments)")}
+        for name, definition in (
+            ("asset_role", "TEXT NOT NULL DEFAULT 'attachment' CHECK(asset_role IN ('attachment', 'figure'))"),
+            ("caption", "TEXT NOT NULL DEFAULT ''"),
+            ("sort_order", "INTEGER NOT NULL DEFAULT 0"),
+            ("is_cover", "INTEGER NOT NULL DEFAULT 0 CHECK(is_cover IN (0, 1))"),
+        ):
+            if name not in attachment_columns:
+                connection.execute(f"ALTER TABLE idea_attachments ADD COLUMN {name} {definition}")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_idea_attachments_figures ON idea_attachments(idea_id, sort_order) WHERE asset_role='figure'")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_idea_attachments_one_cover ON idea_attachments(idea_id) WHERE is_cover=1")
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(ideas)")}
         if "project_id" not in columns:
             connection.execute("ALTER TABLE ideas ADD COLUMN project_id INTEGER REFERENCES projects(id)")

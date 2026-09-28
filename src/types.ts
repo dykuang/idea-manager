@@ -147,6 +147,8 @@ export interface AgentChatSession {
   scope_type: 'all' | 'project' | 'group'
   scope_id: number | null
   idea_id: number | null
+  context_idea_ids: number[]
+  attachment_ids: number[]
   created_at: string
   updated_at: string
   message_count: number

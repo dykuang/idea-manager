@@ -376,6 +376,10 @@ def init_db() -> None:
     with connect() as connection:
         connection.executescript(SCHEMA)
         connection.executescript(RESEARCH_SCHEMA)
+        session_columns = {row["name"] for row in connection.execute("PRAGMA table_info(agent_chat_sessions)")}
+        for name in ("context_idea_ids_json", "attachment_ids_json"):
+            if name not in session_columns:
+                connection.execute(f"ALTER TABLE agent_chat_sessions ADD COLUMN {name} TEXT NOT NULL DEFAULT '[]'")
         attachment_columns = {row["name"] for row in connection.execute("PRAGMA table_info(idea_attachments)")}
         for name, definition in (
             ("asset_role", "TEXT NOT NULL DEFAULT 'attachment' CHECK(asset_role IN ('attachment', 'figure'))"),

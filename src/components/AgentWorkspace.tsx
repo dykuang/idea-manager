@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clock3, FileText, GitBranch, Globe2, KeyRound, LoaderCircle, Paperclip, Plus, Save, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { Check, Clock3, FileText, GitBranch, Globe2, KeyRound, LoaderCircle, Paperclip, Plus, Save, Search, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { IdeaMarkdown } from './IdeaMarkdown'
 import type { AgentChatSession, AgentMessage, AgentMode, AgentProposal, AgentProvider, AgentProviderOption, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, Project, ProjectGroup, ReasoningEffort } from '../types'
@@ -60,6 +60,8 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
   const [savedResult, setSavedResult] = useState<AgentRunSaveResult | null>(null)
   const [availableFiles, setAvailableFiles] = useState<Attachment[]>([])
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([])
+  const [selectedIdeaIds, setSelectedIdeaIds] = useState<number[]>([])
+  const [ideaSearch, setIdeaSearch] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [chatMessages, running])
@@ -79,6 +81,8 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
         : details.session.scope_id === null ? { type: 'all' }
           : { type: details.session.scope_type, id: details.session.scope_id })
       setActiveIdea(details.session.idea_id === null ? null : ideas.find(item => item.id === details.session.idea_id) ?? null)
+      setSelectedIdeaIds(details.session.context_idea_ids ?? [])
+      setSelectedFileIds(details.session.attachment_ids ?? [])
     }).catch(error => setError(error instanceof Error ? error.message : 'Could not load saved agent chats'))
     return () => { mounted = false }
   }, [])
@@ -97,8 +101,13 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
     if (activeIdea) params.set('idea_id', String(activeIdea.id))
     else if (sessionScope.type === 'project') params.set('project_id', String(sessionScope.id))
     else if (sessionScope.type === 'group') params.set('group_id', String(sessionScope.id))
-    api.attachments(params).then(files => { setAvailableFiles(files); setSelectedFileIds([]) }).catch(() => setAvailableFiles([]))
-  }, [activeIdea?.id, sessionScope.type, sessionScope.type === 'all' ? null : sessionScope.id])
+    selectedIdeaIds.forEach(id => params.append('idea_ids', String(id)))
+    api.attachments(params).then(files => {
+      setAvailableFiles(files)
+      const valid = new Set(files.map(file => file.id))
+      setSelectedFileIds(current => current.filter(id => valid.has(id)))
+    }).catch(() => setAvailableFiles([]))
+  }, [activeIdea?.id, selectedIdeaIds.join(','), sessionScope.type, sessionScope.type === 'all' ? null : sessionScope.id])
 
   const contextName = useMemo(() => {
     const projectContext = sessionScope.type === 'project' ? `Project: ${projects.find(item => item.id === sessionScope.id)?.name ?? 'Unknown'}`
@@ -127,6 +136,8 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
         : details.session.scope_id === null ? { type: 'all' }
           : { type: details.session.scope_type, id: details.session.scope_id })
       setActiveIdea(details.session.idea_id === null ? null : ideas.find(item => item.id === details.session.idea_id) ?? null)
+      setSelectedIdeaIds(details.session.context_idea_ids ?? [])
+      setSelectedFileIds(details.session.attachment_ids ?? [])
       setPrompt(''); setResult(null); setSavedResult(null); setResultMode(null)
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not open that saved chat') }
   }
@@ -135,6 +146,7 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
     setSessionId(null); setChatMessages([]); setPrompt(''); setResult(null); setSavedResult(null); setResultMode(null)
     setSessionScope(scope.type === 'project' && projects.find(item => item.id === scope.id)?.system_key === 'recycle' ? { type: 'all' } : scope)
     setActiveIdea(contextIdea)
+    setSelectedIdeaIds([])
     setMode(contextIdea ? 'elaborate' : 'explore')
     setSelectedFileIds([])
   }
@@ -165,6 +177,7 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
         prompt: userMessage, conversation: chatMessages.slice(-12), session_id: sessionId, mode,
         scope_type: sessionScope.type, scope_id: sessionScope.type === 'all' ? null : sessionScope.id,
         idea_id: activeIdea?.id ?? null, model, reasoning_effort: reasoningEffort, web_search: webSearch, attachment_ids: selectedFileIds,
+        context_idea_ids: selectedIdeaIds.filter(id => id !== activeIdea?.id),
       })
       setResult(next); setResultMode(mode)
       setSessionId(next.session_id ?? null)
@@ -240,7 +253,7 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
             const value = event.target.value
             if (value === 'all') setSessionScope({ type: 'all' })
             else { const [type, id] = value.split(':'); setSessionScope({ type: type as 'project' | 'group', id: Number(id) }) }
-            setSelectedFileIds([])
+            setSelectedIdeaIds([]); setSelectedFileIds([])
           }}>
             <option value="all">All active projects</option>
             {groups.map(group => <option value={`group:${group.id}`} key={`group-${group.id}`}>Group · {group.name}</option>)}
@@ -248,6 +261,14 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, is
           </select></label>
           <div><strong>{contextName}</strong>{activeIdea && <small>Idea context: {activeIdea.title}</small>}</div>
         </div>
+        <details className="agent-context-ideas"><summary><Plus size={14}/> Append idea cards <span>{selectedIdeaIds.length ? `${selectedIdeaIds.length} selected` : 'optional'}</span></summary>
+          <label className="agent-context-search"><Search size={14}/><input value={ideaSearch} onChange={event => setIdeaSearch(event.target.value)} placeholder="Find an idea card"/></label>
+          <div className="agent-context-idea-list">{ideas.filter(idea => idea.id !== activeIdea?.id && `${idea.title} ${idea.tags.join(' ')}`.toLowerCase().includes(ideaSearch.toLowerCase())).slice(0, 100).map(idea => <label key={idea.id}>
+            <input type="checkbox" checked={selectedIdeaIds.includes(idea.id)} onChange={event => setSelectedIdeaIds(current => event.target.checked ? [...new Set([...current, idea.id])] : current.filter(id => id !== idea.id))}/>
+            <span><strong>{idea.title}</strong><small>{projects.find(project => project.id === idea.project_id)?.name ?? 'Unknown project'} · {idea.tags.slice(0, 3).join(', ') || 'No tags'}</small></span>
+          </label>)}</div>
+          <p>Selected cards are added to the project context for this chat.</p>
+        </details>
         <p className="agent-privacy-note">{status.privacy}</p>
         <div className="agent-modes" aria-label="Research mode">{modes.map(item => <button key={item.id} className={mode === item.id ? 'active' : ''} onClick={() => chooseMode(item.id)}>{item.label}</button>)}</div>
         {availableFiles.length > 0 && <details className="agent-files"><summary><Paperclip size={14}/> Include local files <span>{selectedFileIds.length ? `${selectedFileIds.length} selected` : 'none selected'}</span></summary><p>Only checked text files are sent to the provider for this run. Their stable ID and local path are included; binary files contribute metadata only.</p><div>{availableFiles.map(file => <label className={file.exists ? '' : 'missing'} key={file.id}><input type="checkbox" disabled={!file.exists} checked={selectedFileIds.includes(file.id)} onChange={event => setSelectedFileIds(current => event.target.checked ? [...current, file.id] : current.filter(id => id !== file.id))}/><FileText size={14}/><span>{file.display_name}<small title={file.absolute_path}>{file.absolute_path}</small><small>{file.storage_mode === 'managed' ? 'managed copy' : 'linked original'}{!file.exists && ' · missing'}</small></span></label>)}</div></details>}

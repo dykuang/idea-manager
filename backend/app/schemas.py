@@ -95,10 +95,11 @@ class AgentRunRequest(BaseModel):
     scope_type: Literal["all", "project", "group"] = "all"
     scope_id: int | None = None
     idea_id: int | None = None
+    context_idea_ids: list[int] = Field(default_factory=list, max_length=20)
     model: str = Field(default="", max_length=100)
     reasoning_effort: ReasoningEffort = ""
     web_search: bool = False
-    attachment_ids: list[int] = []
+    attachment_ids: list[int] = Field(default_factory=list, max_length=12)
 
     @field_validator("prompt")
     @classmethod

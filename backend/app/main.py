@@ -264,6 +264,27 @@ def _agent_context(connection: sqlite3.Connection, payload: AgentRunRequest) -> 
             "status": selected["status"], "tags": _tags(connection, selected["id"]),
             "project_id": selected["project_id"], "project": selected["project_name"],
         })
+    additional_ids = list(dict.fromkeys(payload.context_idea_ids))[:20]
+    if additional_ids:
+        marks = ",".join("?" for _ in additional_ids)
+        selected_rows = connection.execute(
+            f"""SELECT i.*, p.name project_name FROM ideas i
+                LEFT JOIN projects p ON p.id=i.project_id
+                WHERE i.id IN ({marks}) AND COALESCE(p.system_key, '') <> 'recycle'""",
+            additional_ids,
+        ).fetchall()
+        selected_by_id = {int(row["id"]): row for row in selected_rows}
+        if set(additional_ids) != set(selected_by_id):
+            raise HTTPException(404, "One or more selected context ideas were not found")
+        for selected_id in additional_ids:
+            if any(item["id"] == selected_id for item in ideas):
+                continue
+            selected = selected_by_id[selected_id]
+            ideas.append({
+                "id": selected["id"], "title": selected["title"], "content": selected["content"],
+                "status": selected["status"], "tags": _tags(connection, selected["id"]),
+                "project_id": selected["project_id"], "project": selected["project_name"],
+            })
     idea_ids = [item["id"] for item in ideas]
     relations: list[dict[str, Any]] = []
     if idea_ids:
@@ -830,6 +851,8 @@ async def run_agent(payload: AgentRunRequest) -> dict[str, Any]:
             scope_type=payload.scope_type,
             scope_id=payload.scope_id,
             idea_id=payload.idea_id,
+            context_idea_ids=payload.context_idea_ids,
+            attachment_ids=payload.attachment_ids,
         )
     return {
         "id": run_id, "session_id": session_id, "provider": provider, "model": model, "answer": answer,
@@ -1303,8 +1326,20 @@ def pick_file(payload: PathChoice) -> dict[str, str]:
 
 
 @app.get("/api/attachments")
-def list_attachments(idea_id: int | None = None, project_id: int | None = None, group_id: int | None = None) -> list[dict[str, Any]]:
+def list_attachments(idea_id: int | None = None, project_id: int | None = None, group_id: int | None = None, idea_ids: list[int] = Query(default=[])) -> list[dict[str, Any]]:
     with db() as connection:
+        selected_ids = list(dict.fromkeys(([idea_id] if idea_id is not None else []) + idea_ids))[:20]
+        if selected_ids:
+            marks = ",".join("?" for _ in selected_ids)
+            extra = f"ia.idea_id IN ({marks})"
+            extra_params: list[Any] = selected_ids
+            if project_id is not None:
+                extra = f"(i.project_id=? OR {extra})"; extra_params.insert(0, project_id)
+            elif group_id is not None:
+                extra = f"(i.project_id IN (SELECT id FROM projects WHERE group_id=?) OR {extra})"; extra_params.insert(0, group_id)
+            elif idea_id is None:
+                extra = f"(COALESCE(p.system_key, '') <> 'recycle' OR {extra})"
+            return _attachment_rows(connection, extra, extra_params)
         if idea_id is not None:
             return _attachment_rows(connection, "ia.idea_id=?", [idea_id])
         if project_id is not None:

@@ -346,7 +346,7 @@ export default function App() {
     }
   }
 
-  return <div className={`app-shell ${agentContext !== undefined && agentDocked ? 'agent-is-docked' : ''}`} data-ui-mode={uiMode} data-appearance={effectiveAppearance} data-density={studioDensity}>
+  return <div className={`app-shell ${agentContext !== undefined && agentDocked ? 'agent-is-docked' : ''} ${agentContext !== undefined && agentDocked && selected && (view !== 'focus' || detailFullscreen) ? 'agent-has-detail-docked' : ''}`} data-ui-mode={uiMode} data-appearance={effectiveAppearance} data-density={studioDensity}>
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><Sprout size={22}/></div><div><strong>IdeaMiner</strong><span>research idea garden</span></div></div>
       <button className="studio-search-trigger" onClick={() => setPaletteOpen(true)}><Search size={16}/><span>Search ideas or commands…</span><kbd>Ctrl K</kbd></button>

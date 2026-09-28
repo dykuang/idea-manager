@@ -270,6 +270,75 @@ CREATE INDEX IF NOT EXISTS idx_attachments_project ON attachments(project_id, cr
 CREATE INDEX IF NOT EXISTS idx_idea_attachments_attachment ON idea_attachments(attachment_id);
 """
 
+RESEARCH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS micro_experiments (
+    id INTEGER PRIMARY KEY,
+    what_tried TEXT NOT NULL,
+    result TEXT NOT NULL DEFAULT '',
+    takeaway TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','running','completed','failed','inconclusive','needs_follow_up')),
+    dataset_material TEXT NOT NULL DEFAULT '',
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    code_ref TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS experiment_ideas (
+    experiment_id INTEGER NOT NULL REFERENCES micro_experiments(id) ON DELETE CASCADE,
+    idea_id INTEGER NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'tests' CHECK(role IN ('tests','supports','contradicts','motivated-by','follow-up')),
+    PRIMARY KEY(experiment_id, idea_id, role)
+);
+CREATE TABLE IF NOT EXISTS experiment_attachments (
+    experiment_id INTEGER NOT NULL REFERENCES micro_experiments(id) ON DELETE CASCADE,
+    attachment_id INTEGER NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+    asset_role TEXT NOT NULL DEFAULT 'figure' CHECK(asset_role IN ('attachment','figure')),
+    caption TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(experiment_id, attachment_id)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS experiments_fts USING fts5(what_tried, result, takeaway, dataset_material, metrics, code_ref, content='');
+CREATE TABLE IF NOT EXISTS insight_feedback (
+    id INTEGER PRIMARY KEY,
+    concept TEXT NOT NULL CHECK(concept IN ('serendipity','research-gap','experiment-repeat')),
+    subject_key TEXT NOT NULL,
+    action TEXT NOT NULL CHECK(action IN ('dismissed','saved','resolved','snoozed','accepted')),
+    snooze_until TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(concept, subject_key)
+);
+CREATE TABLE IF NOT EXISTS research_intelligence_settings (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+INSERT OR IGNORE INTO research_intelligence_settings(id, settings_json) VALUES (1, '{"experiments_enabled":true,"gap_radar_enabled":true,"serendipity_enabled":true,"stalled_days":30,"serendipity_limit":4,"cross_project":true,"evidence_checks":true,"experiment_fields":[]}');
+CREATE INDEX IF NOT EXISTS idx_experiments_updated ON micro_experiments(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_experiment_ideas_idea ON experiment_ideas(idea_id, role);
+CREATE INDEX IF NOT EXISTS idx_feedback_action ON insight_feedback(concept, action, snooze_until);
+CREATE TRIGGER IF NOT EXISTS experiments_fts_ai AFTER INSERT ON micro_experiments BEGIN
+ INSERT INTO experiments_fts(rowid,what_tried,result,takeaway,dataset_material,metrics,code_ref) VALUES(new.id,new.what_tried,new.result,new.takeaway,new.dataset_material,new.metrics_json,new.code_ref);
+END;
+CREATE TRIGGER IF NOT EXISTS experiments_fts_ad AFTER DELETE ON micro_experiments BEGIN
+ INSERT INTO experiments_fts(experiments_fts,rowid,what_tried,result,takeaway,dataset_material,metrics,code_ref) VALUES('delete',old.id,old.what_tried,old.result,old.takeaway,old.dataset_material,old.metrics_json,old.code_ref);
+END;
+CREATE TRIGGER IF NOT EXISTS experiments_fts_au AFTER UPDATE ON micro_experiments BEGIN
+ INSERT INTO experiments_fts(experiments_fts,rowid,what_tried,result,takeaway,dataset_material,metrics,code_ref) VALUES('delete',old.id,old.what_tried,old.result,old.takeaway,old.dataset_material,old.metrics_json,old.code_ref);
+ INSERT INTO experiments_fts(rowid,what_tried,result,takeaway,dataset_material,metrics,code_ref) VALUES(new.id,new.what_tried,new.result,new.takeaway,new.dataset_material,new.metrics_json,new.code_ref);
+END;
+CREATE TRIGGER IF NOT EXISTS library_experiments_ai AFTER INSERT ON micro_experiments BEGIN UPDATE library_state SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS library_experiments_au AFTER UPDATE ON micro_experiments BEGIN UPDATE library_state SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS library_experiments_ad AFTER DELETE ON micro_experiments BEGIN UPDATE library_state SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS library_experiment_ideas_ai AFTER INSERT ON experiment_ideas BEGIN UPDATE library_state SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS library_experiment_ideas_ad AFTER DELETE ON experiment_ideas BEGIN UPDATE library_state SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS library_experiment_attachments_ai AFTER INSERT ON experiment_attachments BEGIN UPDATE library_state SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS library_experiment_attachments_ad AFTER DELETE ON experiment_attachments BEGIN UPDATE library_state SET revision=revision+1 WHERE id=1; END;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -282,6 +351,7 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as connection:
         connection.executescript(SCHEMA)
+        connection.executescript(RESEARCH_SCHEMA)
         attachment_columns = {row["name"] for row in connection.execute("PRAGMA table_info(idea_attachments)")}
         for name, definition in (
             ("asset_role", "TEXT NOT NULL DEFAULT 'attachment' CHECK(asset_role IN ('attachment', 'figure'))"),

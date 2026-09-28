@@ -23,6 +23,9 @@ from fastapi.responses import FileResponse
 
 from .agent_profiles import CredentialStoreError, credential_store_available, delete_api_key, get_api_key, load_store, reset_profile, save_api_key, save_profile, set_active_provider
 from .database import DB_PATH, db, init_db
+from .experiments import router as experiments_router
+from .research_insights import router as research_insights_router
+from .serendipity import router as serendipity_router
 from .schemas import AgentConnectionCreate, AgentProposalResolution, AgentResultSave, AgentRunRequest, AttachmentCreate, CodexCheckpointCreate, DreamRunRequest, ImportPreviewRequest, ImportRequest, IdeaAttachmentUpdate, IdeaCreate, IdeaUpdate, PathChoice, ProjectAssignment, ProjectCreate, ProjectGroupCreate, RelationCreate, TagBulkUpdate, TagMerge, TagRename, TagSettingsUpdate
 from .semantic import DIMENSIONS as SEMANTIC_DIMENSIONS, MODEL as SEMANTIC_MODEL, rebuild as rebuild_semantic_index, similarity as semantic_similarity
 
@@ -534,6 +537,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="IdeaMiner API", version="0.1.0", lifespan=lifespan)
+app.include_router(experiments_router)
+app.include_router(research_insights_router)
+app.include_router(serendipity_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -1823,7 +1829,17 @@ def _export_data() -> dict[str, Any]:
         relations = [dict(row) for row in connection.execute("SELECT * FROM relations ORDER BY created_at").fetchall()]
         projects = [dict(row) for row in connection.execute("SELECT * FROM projects ORDER BY id").fetchall()]
         groups = [dict(row) for row in connection.execute("SELECT * FROM project_groups ORDER BY id").fetchall()]
-    return {"version": 3, "project_groups": groups, "projects": projects, "ideas": ideas, "relations": relations}
+        experiments = []
+        for row in connection.execute("SELECT * FROM micro_experiments ORDER BY created_at").fetchall():
+            item = dict(row)
+            item["metrics"] = json.loads(item.pop("metrics_json"))
+            item["metadata"] = json.loads(item.pop("metadata_json"))
+            item["idea_links"] = [dict(link) for link in connection.execute("SELECT idea_id,role FROM experiment_ideas WHERE experiment_id=?", (row["id"],))]
+            item["attachments"] = [dict(file) for file in connection.execute(
+                "SELECT a.content_hash,a.display_name,a.mime_type,a.project_id,ea.asset_role,ea.caption,ea.sort_order FROM experiment_attachments ea JOIN attachments a ON a.id=ea.attachment_id WHERE ea.experiment_id=? ORDER BY ea.sort_order,a.id", (row["id"],)
+            )]
+            experiments.append(item)
+    return {"version": 4, "project_groups": groups, "projects": projects, "ideas": ideas, "relations": relations, "experiments": experiments}
 
 
 def _expand_export_references(text: str, by_id: dict[int, dict[str, Any]]) -> str:
@@ -1848,7 +1864,7 @@ def _expand_export_references(text: str, by_id: dict[int, dict[str, Any]]) -> st
 
 def _validated_import(data: dict[str, Any]) -> dict[str, Any]:
     version = data.get("version", 1)
-    if version not in (1, 2, 3):
+    if version not in (1, 2, 3, 4):
         raise HTTPException(400, f"Unsupported IdeaMiner export version: {version}")
     for key in ("ideas", "relations"):
         if not isinstance(data.get(key, []), list):
@@ -1857,6 +1873,8 @@ def _validated_import(data: dict[str, Any]) -> dict[str, Any]:
         for key in ("projects", "project_groups"):
             if not isinstance(data.get(key, []), list):
                 raise HTTPException(400, f"Import field '{key}' must be a list")
+    if version >= 4 and not isinstance(data.get("experiments", []), list):
+        raise HTTPException(400, "Import field 'experiments' must be a list")
     seen_ids: set[int] = set()
     for index, idea in enumerate(data.get("ideas", [])):
         if not isinstance(idea, dict):
@@ -1889,12 +1907,24 @@ def _validated_import(data: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(400, f"Idea {idea_id} has invalid figure ordering")
             if not isinstance(figure.get("is_cover", False), bool):
                 raise HTTPException(400, f"Idea {idea_id} has invalid cover metadata")
+    experiments = data.get("experiments", [])
+    valid_statuses = {"planned", "running", "completed", "failed", "inconclusive", "needs_follow_up"}
+    for index, experiment in enumerate(experiments):
+        if not isinstance(experiment, dict) or not isinstance(experiment.get("what_tried"), str) or not experiment["what_tried"].strip():
+            raise HTTPException(400, f"Experiment {index + 1} has no valid description")
+        if experiment.get("status", "planned") not in valid_statuses:
+            raise HTTPException(400, f"Experiment {index + 1} has an invalid status")
+        if not isinstance(experiment.get("idea_links", []), list) or not isinstance(experiment.get("attachments", []), list):
+            raise HTTPException(400, f"Experiment {index + 1} has invalid links or attachments")
+        if not isinstance(experiment.get("metrics", {}), dict) or not isinstance(experiment.get("metadata", {}), dict):
+            raise HTTPException(400, f"Experiment {index + 1} has invalid metadata")
     return {
         "version": version,
         "project_groups": data.get("project_groups", []),
         "projects": data.get("projects", []),
         "ideas": data.get("ideas", []),
         "relations": data.get("relations", []),
+        "experiments": experiments,
     }
 
 
@@ -1940,6 +1970,7 @@ def preview_import(payload: ImportPreviewRequest) -> dict[str, Any]:
             "projects": len(data["projects"]),
             "ideas": len(data["ideas"]),
             "relations": valid_relations,
+            "experiments": len(data["experiments"]),
         },
         "duplicate_topics": duplicate_topics,
         "project_conflicts": project_conflicts,
@@ -1951,6 +1982,7 @@ def preview_import(payload: ImportPreviewRequest) -> dict[str, Any]:
 def import_json(payload: ImportRequest) -> dict[str, Any]:
     data = _validated_import(payload.data)
     result = {"groups_created": 0, "projects_created": 0, "ideas_created": 0, "ideas_skipped": 0, "ideas_updated": 0, "relations_created": 0}
+    result["experiments_created"] = 0
     with db() as connection:
         default_id = connection.execute("SELECT id FROM projects WHERE system_key='random_chat'").fetchone()["id"]
         group_map: dict[int, int] = {}
@@ -2075,6 +2107,35 @@ def import_json(payload: ImportRequest) -> dict[str, Any]:
                 (source_id, target_id, relation_type.strip().lower(), str(relation.get("note", ""))),
             )
             result["relations_created"] += cursor.rowcount
+        idea_ids = {int(idea["id"]) for idea in data["ideas"]}
+        for experiment in data["experiments"]:
+            cursor = connection.execute(
+                """INSERT INTO micro_experiments(what_tried,result,takeaway,status,dataset_material,metrics_json,code_ref,metadata_json,created_at,updated_at,completed_at)
+                   VALUES(?,?,?,?,?,?,?, ?,COALESCE(?,strftime('%Y-%m-%dT%H:%M:%fZ','now')),COALESCE(?,strftime('%Y-%m-%dT%H:%M:%fZ','now')),?)""",
+                (experiment["what_tried"].strip(),str(experiment.get("result", "")),str(experiment.get("takeaway", "")),experiment.get("status", "planned"),str(experiment.get("dataset_material", "")),json.dumps(experiment.get("metrics", {}), ensure_ascii=False),str(experiment.get("code_ref", "")),json.dumps(experiment.get("metadata", {}), ensure_ascii=False),experiment.get("created_at") or None,experiment.get("updated_at") or None,experiment.get("completed_at") or None),
+            )
+            experiment_id = cursor.lastrowid
+            for link in experiment.get("idea_links", []):
+                if not isinstance(link, dict):
+                    continue
+                try: old_idea_id = int(link.get("idea_id"))
+                except (TypeError, ValueError): continue
+                new_idea_id = idea_map.get(old_idea_id)
+                role = link.get("role", "tests")
+                if old_idea_id in idea_ids and new_idea_id and role in ("tests", "supports", "contradicts", "motivated-by", "follow-up"):
+                    connection.execute("INSERT OR IGNORE INTO experiment_ideas(experiment_id,idea_id,role) VALUES(?,?,?)", (experiment_id,new_idea_id,role))
+            for asset in experiment.get("attachments", []):
+                if not isinstance(asset, dict) or not isinstance(asset.get("content_hash"),str) or not asset["content_hash"]:
+                    continue
+                old_project = asset.get("project_id")
+                try: mapped_project = project_map.get(int(old_project)) if old_project is not None else None
+                except (TypeError,ValueError): mapped_project = None
+                if mapped_project is None:
+                    continue
+                attachment = connection.execute("SELECT id FROM attachments WHERE project_id=? AND content_hash=? ORDER BY id LIMIT 1", (mapped_project,asset["content_hash"])).fetchone()
+                if attachment:
+                    connection.execute("INSERT OR IGNORE INTO experiment_attachments(experiment_id,attachment_id,asset_role,caption,sort_order) VALUES(?,?,?,?,?)", (experiment_id,attachment["id"],asset.get("asset_role","figure") if asset.get("asset_role") in ("attachment","figure") else "figure",str(asset.get("caption",""))[:500],max(0,int(asset.get("sort_order",0) or 0))))
+            result["experiments_created"] += 1
     return {"status": "imported", **result}
 
 

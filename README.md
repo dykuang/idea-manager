@@ -29,7 +29,9 @@ For example: capture “Could prediction change with temporal scale?”, grow se
 - Figure galleries with captions, ordering, and a per-idea cover image
 - Clipboard paste and drag/drop for local PNG, JPEG, WebP, GIF, and SVG figures
 - JSON import/export and Markdown export
-- Weekly review, local semantic discovery, and cross-project Dream synthesis
+- Micro-experiment logs with idea links, searchable results, repeat detection, figures, and metadata
+- Weekly Review with deterministic Research Gap Radar, experiment follow-up, and cross-project Serendipity suggestions
+- Local semantic discovery, lineage exploration, and cross-project Dream synthesis
 - Optional Agent workspace with separate OpenAI, Anthropic, DeepSeek, Qwen, and local profiles
 - Optional MCP bridge for using the same library from Codex
 

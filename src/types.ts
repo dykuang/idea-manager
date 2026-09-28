@@ -172,3 +172,51 @@ export interface ReviewData {
   pending_proposals: ReviewProposal[]
   semantic_opportunities: SemanticOpportunity[]
 }
+
+export type ExperimentStatus = 'planned' | 'running' | 'completed' | 'failed' | 'inconclusive' | 'needs_follow_up'
+export interface MicroExperiment {
+  id: number
+  what_tried: string
+  result: string
+  takeaway: string
+  status: ExperimentStatus
+  dataset_material: string
+  metrics: Record<string, unknown>
+  code_ref: string
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+  ideas: { idea_id: number; title: string; project_id: number; role: string }[]
+  attachments: { id: number; display_name: string; mime_type: string; asset_role: 'attachment' | 'figure'; caption: string }[]
+}
+export interface ResearchIntelligenceSettings {
+  experiments_enabled: boolean
+  gap_radar_enabled: boolean
+  serendipity_enabled: boolean
+  stalled_days: number
+  serendipity_limit: number
+  cross_project: boolean
+  evidence_checks: boolean
+  experiment_fields: string[]
+}
+export interface ResearchGap {
+  id: string
+  type: string
+  title: string
+  detail: string
+  target: { idea_id?: number; experiment_id?: number; relation_id?: number }
+  priority: number
+}
+export interface SerendipityPair {
+  source_id: number
+  source_title: string
+  source_project: string
+  target_id: number
+  target_title: string
+  target_project: string
+  score: number
+  semantic_similarity: number
+  reason: string
+  feedback_key: string
+}

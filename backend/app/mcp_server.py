@@ -22,6 +22,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from .database import db, init_db
+from .experiments import ExperimentInput, create_experiment as api_create_experiment, search_experiments as api_search_experiments
 from .main import (
     _fts_query,
     attach_file as api_attach_file,
@@ -212,6 +213,48 @@ def search_ideas(
 def get_idea(reference: str) -> dict[str, Any]:
     """Read one idea using its stable reference, numeric ID, or unambiguous title."""
     return {"idea": _resolve_idea(reference)}
+
+
+@mcp.tool(title="Search IdeaMiner experiments", annotations=READ_ONLY)
+def search_micro_experiments(
+    query: str = "",
+    status: Literal["", "planned", "running", "completed", "failed", "inconclusive", "needs_follow_up"] = "",
+    idea: str = "",
+    limit: int = 25,
+) -> dict[str, Any]:
+    """Search the experiment log by method, result, takeaway, dataset, or linked idea."""
+    if limit < 1 or limit > 100:
+        raise ValueError("limit must be between 1 and 100")
+    idea_id = _resolve_idea(idea)["id"] if idea.strip() else None
+    try:
+        items = api_search_experiments(q=query, status=status or None, idea_id=idea_id, limit=limit)
+    except Exception as error:
+        raise _friendly_error(error) from error
+    return {"count": len(items), "experiments": items}
+
+
+@mcp.tool(title="Log IdeaMiner experiment", annotations=LOCAL_WRITE)
+def log_micro_experiment(
+    what_tried: str,
+    idea: str,
+    result: str = "",
+    takeaway: str = "",
+    status: Literal["planned", "running", "completed", "failed", "inconclusive", "needs_follow_up"] = "planned",
+    dataset_material: str = "",
+    code_ref: str = "",
+    idempotency_key: str = "",
+) -> dict[str, Any]:
+    """Record a small research experiment and link it to an existing idea reference."""
+    idea_id = _resolve_idea(idea)["id"]
+    payload = ExperimentInput(what_tried=what_tried, result=result, takeaway=takeaway, status=status, dataset_material=dataset_material, code_ref=code_ref, idea_links=[{"idea_id": idea_id, "role": "tests"}])
+
+    def operation() -> dict[str, Any]:
+        try:
+            return api_create_experiment(payload)
+        except Exception as error:
+            raise _friendly_error(error) from error
+
+    return {"experiment": _idempotent("log_micro_experiment", idempotency_key, operation)}
 
 
 @mcp.tool(title="Create an IdeaMiner project", annotations=LOCAL_WRITE)

@@ -29,6 +29,7 @@ from backend.app.mcp_server import (
     search_ideas as mcp_search_ideas,
     update_idea as mcp_update_idea,
 )
+from backend.app.mcp_server import log_micro_experiment as mcp_log_micro_experiment, search_micro_experiments as mcp_search_micro_experiments
 
 
 def test_deepseek_responses_provider(monkeypatch):
@@ -89,6 +90,68 @@ def test_deepseek_responses_provider(monkeypatch):
         client.delete(f"/api/ideas/{child['id']}", params={"permanent": True})
         client.delete(f"/api/ideas/{parent['id']}", params={"permanent": True})
         client.delete("/api/agent/config")
+
+
+def test_micro_experiment_crud_fts_repeat_and_round_trip():
+    with TestClient(app) as client:
+        idea = client.post("/api/ideas", json={"title":"SEED-V calibration study", "content":"Evaluate label smoothing for the new image model", "raw_text":"seed v calibration original"}).json()
+        created = client.post("/api/experiments", json={
+            "what_tried":"SEED-V label smoothing at 0.1", "result":"Failed to improve validation accuracy", "takeaway":"The baseline remains stronger", "status":"failed",
+            "dataset_material":"SEED-V held-out validation split", "metrics":{"accuracy":0.72}, "code_ref":"abc123",
+            "idea_links":[{"idea_id":idea["id"],"role":"tests"}], "attachment_ids":[], "metadata":{"lab":"pilot"}
+        })
+        assert created.status_code == 200, created.text
+        experiment = created.json()
+        assert experiment["ideas"][0]["role"] == "tests"
+        assert experiment["metrics"] == {"accuracy":0.72}
+        assert client.get("/api/experiments", params={"q":"SEED-V"}).json()[0]["id"] == experiment["id"]
+        assert client.get("/api/experiments", params={"q":"label smoothing", "status":"failed"}).json()[0]["id"] == experiment["id"]
+        assert client.get("/api/experiments", params={"idea_id":idea["id"]}).json()[0]["id"] == experiment["id"]
+        matches = client.get("/api/experiments/repeat-detection/matches", params={"q":"SEED-V label smoothing","idea_id":idea["id"]}).json()
+        assert matches and matches[0]["id"] == experiment["id"]
+        dismissed = client.post("/api/research-intelligence/feedback", json={"concept":"experiment-repeat","subject_key":matches[0]["feedback_key"],"action":"dismissed"})
+        assert dismissed.status_code == 200
+        assert all(item["id"] != experiment["id"] for item in client.get("/api/experiments/repeat-detection/matches", params={"q":"SEED-V label smoothing","idea_id":idea["id"]}).json())
+        updated = client.put(f"/api/experiments/{experiment['id']}", json={**{key:experiment[key] for key in ("what_tried","result","takeaway","status","dataset_material","code_ref","metrics","metadata")}, "takeaway":"Keep the established baseline", "idea_links":[{"idea_id":idea["id"],"role":"supports"}], "attachment_ids":[]})
+        assert updated.status_code == 200
+        assert "established baseline" in client.get("/api/experiments", params={"q":"established baseline"}).json()[0]["takeaway"]
+        exported = client.get("/api/export/json").json()
+        assert exported["version"] == 4 and exported["experiments"]
+        preview = client.post("/api/import/preview", json={"data":exported})
+        assert preview.status_code == 200 and preview.json()["counts"]["experiments"] >= 1
+        review = client.get("/api/research-intelligence/weekly-review")
+        assert review.status_code == 200
+        radar = client.get("/api/research-intelligence/gaps")
+        assert radar.status_code == 200 and isinstance(radar.json(), list)
+        assert client.delete(f"/api/experiments/{experiment['id']}").status_code == 200
+        assert client.delete(f"/api/ideas/{idea['id']}", params={"permanent": True}).status_code == 200
+
+
+def test_research_settings_feedback_and_mcp_experiment_tools():
+    with TestClient(app) as client:
+        idea = client.post("/api/ideas", json={"title":"Local MCP experiment utility", "content":"Study a new local baseline", "raw_text":"mcp experiment source"}).json()
+        saved = client.post("/api/research-intelligence/feedback", json={"concept":"serendipity","subject_key":"pair:900001:900002","action":"dismissed"})
+        assert saved.status_code == 200
+        updated = client.put("/api/research-intelligence/settings", json={"stalled_days":45,"serendipity_limit":3,"cross_project":False})
+        assert updated.status_code == 200 and updated.json()["stalled_days"] == 45
+        logged = mcp_log_micro_experiment("Compare a local baseline", f"[[idea:{idea['id']}]]", status="planned")
+        assert logged["experiment"]["ideas"][0]["idea_id"] == idea["id"]
+        found = mcp_search_micro_experiments(query="local baseline", idea=f"[[idea:{idea['id']}]]")
+        assert found["count"] == 1
+        client.delete(f"/api/experiments/{logged['experiment']['id']}")
+        client.delete(f"/api/ideas/{idea['id']}", params={"permanent": True})
+        client.put("/api/research-intelligence/settings", json={"stalled_days":30,"serendipity_limit":4,"cross_project":True})
+
+
+def test_import_v4_restores_experiment_and_idea_link():
+    with TestClient(app) as client:
+        package={"version":4,"project_groups":[],"projects":[],"ideas":[{"id":881021,"title":"portable experiment idea","content":"","raw_text":"portable original","status":"promising","tags":[]}],"relations":[],"experiments":[{"id":900101,"what_tried":"Portable test","result":"Result","takeaway":"Takeaway","status":"completed","dataset_material":"sample","metrics":{"score":0.9},"metadata":{"temperature":"cold"},"idea_links":[{"idea_id":881021,"role":"supports"}],"attachments":[]}]}
+        result=client.post("/api/import/json",json={"data":package,"duplicate_strategy":"skip","project_strategy":"merge"})
+        assert result.status_code==200 and result.json()["experiments_created"]==1
+        imported=client.get("/api/experiments",params={"q":"Portable test"}).json()[0]
+        assert imported["ideas"][0]["role"]=="supports" and imported["metrics"]=={"score":0.9}
+        client.delete(f"/api/experiments/{imported['id']}")
+        client.delete(f"/api/ideas/{imported['ideas'][0]['idea_id']}",params={"permanent":True})
 
 
 def test_anthropic_messages_provider(monkeypatch):

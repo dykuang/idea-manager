@@ -1,4 +1,4 @@
-import type { AgentMode, AgentProvider, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, Project, ProjectGroup, ReasoningEffort, Relation, ReviewData, SemanticOpportunity, SemanticStatus, Status, Suggestion, TagInfo, TagMapData } from './types'
+import type { AgentMode, AgentProvider, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, MicroExperiment, Project, ProjectGroup, ReasoningEffort, Relation, ResearchGap, ResearchIntelligenceSettings, ReviewData, SemanticOpportunity, SemanticStatus, SerendipityPair, Status, Suggestion, TagInfo, TagMapData } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -14,7 +14,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export interface ImportPreview {
   version: number
-  counts: { groups: number; projects: number; ideas: number; relations: number }
+  counts: { groups: number; projects: number; ideas: number; relations: number; experiments?: number }
   duplicate_topics: number
   project_conflicts: string[]
   group_conflicts: string[]
@@ -28,6 +28,7 @@ export interface ImportResult {
   ideas_skipped: number
   ideas_updated: number
   relations_created: number
+  experiments_created: number
 }
 
 export const api = {
@@ -64,6 +65,16 @@ export const api = {
   rebuildSemantic: () => request<SemanticStatus>('/semantic/rebuild', { method: 'POST' }),
   semanticOpportunities: (params = new URLSearchParams()) => request<SemanticOpportunity[]>(`/semantic/opportunities?${params}`),
   review: (params = new URLSearchParams()) => request<ReviewData>(`/review?${params}`),
+  experiments: (params = new URLSearchParams()) => request<MicroExperiment[]>(`/experiments?${params}`),
+  createExperiment: (data: { what_tried: string; result: string; takeaway: string; status: MicroExperiment['status']; dataset_material: string; metrics: Record<string, unknown>; code_ref: string; metadata: Record<string, unknown>; idea_links: { idea_id: number; role: string }[]; attachment_ids: number[] }) => request<MicroExperiment>('/experiments', { method: 'POST', body: JSON.stringify(data) }),
+  updateExperiment: (id: number, data: { what_tried: string; result: string; takeaway: string; status: MicroExperiment['status']; dataset_material: string; metrics: Record<string, unknown>; code_ref: string; metadata: Record<string, unknown>; idea_links: { idea_id: number; role: string }[]; attachment_ids: number[] }) => request<MicroExperiment>(`/experiments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  repeatMatches: (q: string, idea_id?: number) => request<(MicroExperiment & { score: number; linked_to_idea: boolean; feedback_key: string })[]>(`/experiments/repeat-detection/matches?${new URLSearchParams({ q, ...(idea_id ? { idea_id: String(idea_id) } : {}) })}`),
+  researchSettings: () => request<ResearchIntelligenceSettings>('/research-intelligence/settings'),
+  updateResearchSettings: (data: Partial<ResearchIntelligenceSettings>) => request<ResearchIntelligenceSettings>('/research-intelligence/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  researchGaps: (params = new URLSearchParams()) => request<ResearchGap[]>(`/research-intelligence/gaps?${params}`),
+  experimentReview: (params = new URLSearchParams()) => request<{ recently_completed: MicroExperiment[]; inconclusive: MicroExperiment[]; failed: MicroExperiment[]; untouched_planned: MicroExperiment[] }>(`/research-intelligence/weekly-review?${params}`),
+  insightFeedback: (data: { concept: 'serendipity' | 'research-gap' | 'experiment-repeat'; subject_key: string; action: 'dismissed' | 'saved' | 'resolved' | 'snoozed' | 'accepted'; snooze_until?: string; metadata?: Record<string, unknown> }) => request('/research-intelligence/feedback', { method: 'POST', body: JSON.stringify(data) }),
+  serendipity: (params = new URLSearchParams()) => request<SerendipityPair[]>(`/serendipity?${params}`),
   agentStatus: () => request<AgentStatus>('/agent/status'),
   configureAgent: (data: { provider: AgentProvider; api_key: string; model: string; base_url: string; reasoning_effort: ReasoningEffort; remember_api_key: boolean }) => request<AgentStatus>('/agent/config', { method: 'POST', body: JSON.stringify(data) }),
   activateAgentProvider: (provider: AgentProvider) => request<AgentStatus>(`/agent/activate/${provider}`, { method: 'POST' }),

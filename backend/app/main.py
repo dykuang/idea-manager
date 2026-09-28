@@ -1328,7 +1328,7 @@ def pick_file(payload: PathChoice) -> dict[str, str]:
 @app.get("/api/attachments")
 def list_attachments(idea_id: int | None = None, project_id: int | None = None, group_id: int | None = None, idea_ids: list[int] = Query(default=[])) -> list[dict[str, Any]]:
     with db() as connection:
-        selected_ids = list(dict.fromkeys(([idea_id] if idea_id is not None else []) + idea_ids))[:20]
+        selected_ids = list(dict.fromkeys(([idea_id] if idea_id is not None else []) + idea_ids))[:21]
         if selected_ids:
             marks = ",".join("?" for _ in selected_ids)
             extra = f"ia.idea_id IN ({marks})"

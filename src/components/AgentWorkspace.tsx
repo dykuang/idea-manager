@@ -21,12 +21,14 @@ function payloadPreview(proposal: AgentProposal) {
   return [String(data.idea_title || ''), String(data.status || ''), tags && `#${tags.replaceAll(', ', ' #')}`].filter(Boolean).join(' · ')
 }
 
-export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, onClose, onChanged, onIdeaSelect }: {
+export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, isDocked, onDockToggle, onClose, onChanged, onIdeaSelect }: {
   scope: Scope
   contextIdea: Idea | null
   ideas: Idea[]
   projects: Project[]
   groups: ProjectGroup[]
+  isDocked: boolean
+  onDockToggle: () => void
   onClose: () => void
   onChanged: () => Promise<void>
   onIdeaSelect: (id: number) => void
@@ -212,9 +214,9 @@ export function AgentWorkspace({ scope, contextIdea, ideas, projects, groups, on
     finally { setSavingResult(null) }
   }
 
-  return <div className="modal-backdrop agent-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-    <section className="agent-workspace">
-      <header><div><p className="eyebrow">RESEARCH AGENT</p><h2><Sparkles size={25}/> Agent chat</h2></div><button className="icon-button" onClick={onClose} aria-label="Close agent chat"><X size={20}/></button></header>
+  return <div className={isDocked ? 'agent-docked' : 'modal-backdrop agent-backdrop'} onMouseDown={event => !isDocked && event.target === event.currentTarget && onClose()}>
+    <section className={`agent-workspace ${isDocked ? 'agent-workspace-docked' : ''}`}>
+      <header><div><p className="eyebrow">RESEARCH AGENT</p><h2><Sparkles size={25}/> Agent chat</h2></div><div className="agent-window-actions"><button className="button secondary small" onClick={onDockToggle}>{isDocked ? 'Float window' : 'Dock right'}</button><button className="icon-button" onClick={onClose} aria-label="Close agent chat"><X size={20}/></button></div></header>
       {!status ? <div className="agent-loading"><LoaderCircle className="spin" size={20}/> Checking provider…</div> : <>
         <nav className="agent-provider-tabs" aria-label="Agent providers">{status.providers.map(item => <button key={item.id} className={provider === item.id ? 'active' : ''} onClick={() => void chooseProvider(item.id)}><span>{item.label}</span><i className={item.configured ? 'ready' : ''}/></button>)}</nav>
         {(!status.configured || editingConnection) ? <div className="agent-setup agent-connection-form">

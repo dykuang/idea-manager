@@ -77,6 +77,7 @@ export default function App() {
   const [scope, setScope] = useState<Scope>({ type: 'all' })
   const [managingProjects, setManagingProjects] = useState(false)
   const [agentContext, setAgentContext] = useState<Idea | null | undefined>(undefined)
+  const [agentDocked, setAgentDocked] = useState(() => window.localStorage.getItem('ideaminer-agent-docked') === 'true')
   const [reviewOpen, setReviewOpen] = useState(false)
   const [dreamOpen, setDreamOpen] = useState(false)
   const [dreamIdeaIds, setDreamIdeaIds] = useState<number[]>([])
@@ -92,6 +93,7 @@ export default function App() {
   useEffect(() => { window.localStorage.setItem('ideaminer-ui-mode', uiMode) }, [uiMode])
   useEffect(() => { window.localStorage.setItem('ideaminer-appearance', appearance) }, [appearance])
   useEffect(() => { window.localStorage.setItem('ideaminer-density', studioDensity) }, [studioDensity])
+  useEffect(() => { window.localStorage.setItem('ideaminer-agent-docked', String(agentDocked)) }, [agentDocked])
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const update = () => setSystemDark(media.matches)
@@ -344,7 +346,7 @@ export default function App() {
     }
   }
 
-  return <div className="app-shell" data-ui-mode={uiMode} data-appearance={effectiveAppearance} data-density={studioDensity}>
+  return <div className={`app-shell ${agentContext !== undefined && agentDocked ? 'agent-is-docked' : ''}`} data-ui-mode={uiMode} data-appearance={effectiveAppearance} data-density={studioDensity}>
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><Sprout size={22}/></div><div><strong>IdeaMiner</strong><span>research idea garden</span></div></div>
       <button className="studio-search-trigger" onClick={() => setPaletteOpen(true)}><Search size={16}/><span>Search ideas or commands…</span><kbd>Ctrl K</kbd></button>
@@ -430,10 +432,10 @@ export default function App() {
       </section>
     </main>
 
-    {editor && <IdeaEditor idea={editor === 'new' ? null : editor} projects={projects} defaultProjectId={defaultProjectId} ideas={allIdeas} onClose={() => setEditor(null)} onSave={saveIdea}/>} 
-    {managingProjects && <ProjectManager groups={projectGroups} onClose={() => setManagingProjects(false)} onCreateProject={createProject} onCreateGroup={createProjectGroup}/>} 
-    {importState && <ImportDialog filename={importState.filename} preview={importState.preview} onClose={() => setImportState(null)} onImport={runImport}/>} 
-    {managingTags && <TagManager visibleIdeaIds={ideas.map(idea => idea.id)} scope={scope} onClose={() => setManagingTags(false)} onChanged={refresh} onFilterTag={name => { setActiveTags([name]); setManagingTags(false) }}/>} 
+    {editor && <IdeaEditor idea={editor === 'new' ? null : editor} projects={projects} defaultProjectId={defaultProjectId} ideas={allIdeas} onClose={() => setEditor(null)} onSave={saveIdea}/>}
+    {managingProjects && <ProjectManager groups={projectGroups} onClose={() => setManagingProjects(false)} onCreateProject={createProject} onCreateGroup={createProjectGroup}/>}
+    {importState && <ImportDialog filename={importState.filename} preview={importState.preview} onClose={() => setImportState(null)} onImport={runImport}/>}
+    {managingTags && <TagManager visibleIdeaIds={ideas.map(idea => idea.id)} scope={scope} onClose={() => setManagingTags(false)} onChanged={refresh} onFilterTag={name => { setActiveTags([name]); setManagingTags(false) }}/>}
     {selected && (view !== 'focus' || detailFullscreen) && <div className={`drawer-backdrop ${detailFullscreen ? 'detail-fullscreen-backdrop' : ''}`} onMouseDown={e => e.target === e.currentTarget && (detailFullscreen ? setDetailFullscreen(false) : setSelected(null))}><aside className={`detail-drawer ${detailFullscreen ? 'fullscreen' : ''}`}>
       <header><label className={`status-pill status-picker ${selected.status}`}><span/><select value={selected.status} onChange={event => void changeIdeaStatus(event.target.value as Status)} aria-label="Change idea status">{(Object.keys(statusLabels) as Status[]).map(value => <option value={value} key={value}>{statusLabels[value]}</option>)}</select></label><div><button className="icon-button" aria-label={detailFullscreen ? 'Restore idea drawer' : 'View idea full screen'} title={detailFullscreen ? 'Restore drawer' : 'View full screen'} onClick={() => setDetailFullscreen(value => !value)}>{detailFullscreen ? <Minimize2 size={17}/> : <Maximize2 size={17}/>}</button><button className="icon-button danger" title={projects.find(project => project.id === selected.project_id)?.system_key === 'recycle' ? 'Delete permanently' : 'Move to recycle'} onClick={() => removeIdea(selected.id)}><Trash2 size={17}/></button><button className="icon-button" aria-label="Close idea" onClick={() => detailFullscreen && view === 'focus' ? setDetailFullscreen(false) : setSelected(null)}><X size={20}/></button></div></header>
       <h1>{selected.title}</h1><div className="detail-tags">{selected.tags.map(t => <span className="tag" style={styleForTag(t)} key={t}>#{t}</span>)}</div>
@@ -448,9 +450,9 @@ export default function App() {
       <section className="detail-section"><h3><Sprout size={16}/> Related ideas</h3>{suggestions.length ? suggestions.map(item => <button className="suggestion" key={item.id} onClick={() => openIdea(item.id)}><strong>{item.title}</strong><span>{item.reason}</span></button>) : <p className="empty-small">Add tags or richer notes to surface connections.</p>}</section>
       <details className="original"><summary>Original capture</summary><pre>{selected.raw_text}</pre></details>
     </aside></div>}
-    {agentContext !== undefined && <AgentWorkspace scope={scope} contextIdea={agentContext} ideas={allIdeas} projects={projects} groups={projectGroups} onClose={() => setAgentContext(undefined)} onChanged={refresh} onIdeaSelect={id => { setAgentContext(undefined); void openIdea(id) }}/>} 
+    {agentContext !== undefined && <AgentWorkspace scope={scope} contextIdea={agentContext} ideas={allIdeas} projects={projects} groups={projectGroups} isDocked={agentDocked} onDockToggle={() => setAgentDocked(current => !current)} onClose={() => setAgentContext(undefined)} onChanged={refresh} onIdeaSelect={id => { setAgentContext(undefined); void openIdea(id) }}/>}
     {reviewOpen && <ReviewDashboard scope={scope} scopeTitle={scopeTitle} onClose={() => setReviewOpen(false)} onChanged={refresh} onIdeaSelect={id => { setReviewOpen(false); void openIdea(id) }} onLineageSelect={id => { setReviewOpen(false); switchView('lineage'); void openIdea(id) }} onDream={ids => { setDreamIdeaIds(ids); setReviewOpen(false); setDreamOpen(true) }}/>}
-    {dreamOpen && <DreamWorkspace ideaIds={dreamIdeaIds} ideas={allIdeas} projects={projects} onClose={() => setDreamOpen(false)} onRemove={id => setDreamIdeaIds(current => current.filter(item => item !== id))} onChanged={refresh} onIdeaSelect={id => { setDreamOpen(false); void openIdea(id) }} onOpenAgent={() => { setDreamOpen(false); setAgentContext(null) }}/>} 
+    {dreamOpen && <DreamWorkspace ideaIds={dreamIdeaIds} ideas={allIdeas} projects={projects} onClose={() => setDreamOpen(false)} onRemove={id => setDreamIdeaIds(current => current.filter(item => item !== id))} onChanged={refresh} onIdeaSelect={id => { setDreamOpen(false); void openIdea(id) }} onOpenAgent={() => { setDreamOpen(false); setAgentContext(null) }}/>}
     <button className={`dream-dock ${dreamIdeaIds.length ? 'ready' : ''}`} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addDreamIdea(Number(event.dataTransfer.getData('application/x-ideaminer-idea'))) }} onClick={() => setDreamOpen(true)}><CloudMoon size={18}/><span>{dreamIdeaIds.length ? `${dreamIdeaIds.length} idea${dreamIdeaIds.length === 1 ? '' : 's'} ready to Dream` : 'Drag ideas here to Dream'}</span></button>
     {stopped && <div className="shutdown-screen"><div className="shutdown-card"><div className="brand-mark"><Sprout size={25}/></div><p className="eyebrow">SHUTDOWN COMPLETE</p><h1>IdeaMiner has stopped.</h1><p>Your ideas are safely stored in SQLite. You can close this browser tab and double-click <code>start-ideaminer.bat</code> whenever you want to return.</p></div></div>}
     {paletteOpen && <CommandPalette ideas={allIdeas} onClose={() => setPaletteOpen(false)} onOpenIdea={id => { void openIdea(id); switchView('focus') }} onCapture={() => { switchView('focus'); setEditor('new') }} onAction={runStudioCommand} uiMode={uiMode} onSwitchMode={() => setUiMode(value => value === 'studio' ? 'classic' : 'studio')} onToggleAppearance={() => setAppearance(value => value === 'dark' || (value === 'system' && systemDark) ? 'light' : 'dark')}/>}

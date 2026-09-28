@@ -33,6 +33,12 @@ For example: capture “Could prediction change with temporal scale?”, grow se
 - Optional Agent workspace with separate OpenAI, Anthropic, DeepSeek, Qwen, and local profiles
 - Optional MCP bridge for using the same library from Codex
 
+## Interface modes
+
+IdeaMiner includes two saved interface modes. **Classic** keeps the original layout. **Studio** offers a denser three-pane research workspace with a persistent navigator and idea inspector. Choose a mode from **Appearance** in the top bar. Studio also supports light, dark, or system appearance and comfortable, compact, or dense idea lists. Your preferences are stored in this browser and do not change the SQLite library.
+
+Press **Ctrl+K** (or **Cmd+K** on macOS) to search ideas and run commands such as opening Graph, Lineage, Review, Agent, and Dream, managing projects or tags, and importing or exporting data.
+
 ## Quick start on Windows
 
 ### Requirements

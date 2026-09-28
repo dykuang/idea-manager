@@ -3,6 +3,8 @@ import { ClipboardCheck, CloudMoon, Copy, Download, FileImage, Folder, FolderInp
 import { api, type ImportPreview, type ImportResult } from './api'
 import { AgentWorkspace } from './components/AgentWorkspace'
 import { AttachmentPanel } from './components/AttachmentPanel'
+import { AppearanceMenu, type Appearance, type Density, type UiMode } from './components/AppearanceMenu'
+import { CommandPalette } from './components/CommandPalette'
 import { FigureGallery } from './components/FigureGallery'
 import { DreamWorkspace } from './components/DreamWorkspace'
 import { GraphView } from './components/GraphView'
@@ -49,6 +51,19 @@ export default function App() {
   const [relationFilter, setRelationFilter] = useState('')
   const [view, setView] = useState<View>('focus')
   const [focusDensity, setFocusDensity] = useState<FocusDensity>(() => window.localStorage.getItem('ideaminer-focus-density') === 'compact' ? 'compact' : 'comfortable')
+  const [uiMode, setUiMode] = useState<UiMode>(() => window.localStorage.getItem('ideaminer-ui-mode') === 'studio' ? 'studio' : 'classic')
+  const [appearance, setAppearance] = useState<Appearance>(() => {
+    const saved = window.localStorage.getItem('ideaminer-appearance')
+    return saved === 'dark' || saved === 'system' ? saved : 'light'
+  })
+  const [studioDensity, setStudioDensity] = useState<Density>(() => {
+    const saved = window.localStorage.getItem('ideaminer-density')
+    return saved === 'compact' || saved === 'dense' ? saved : 'comfortable'
+  })
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [studioNavOpen, setStudioNavOpen] = useState(false)
+  const [studioInspectorOpen, setStudioInspectorOpen] = useState(true)
   const [editor, setEditor] = useState<'new' | Idea | null>(null)
   const [selected, setSelected] = useState<(Idea & { relations?: Relation[] }) | null>(null)
   const [detailFullscreen, setDetailFullscreen] = useState(false)
@@ -71,6 +86,27 @@ export default function App() {
   const selectedIdeaId = useRef<number | null>(null)
   const initialDeepLinkOpened = useRef(false)
   const [importState, setImportState] = useState<{ filename: string; data: Record<string, unknown>; preview: ImportPreview } | null>(null)
+
+  const effectiveAppearance = appearance === 'system' ? (systemDark ? 'dark' : 'light') : appearance
+  useEffect(() => { window.localStorage.setItem('ideaminer-ui-mode', uiMode) }, [uiMode])
+  useEffect(() => { window.localStorage.setItem('ideaminer-appearance', appearance) }, [appearance])
+  useEffect(() => { window.localStorage.setItem('ideaminer-density', studioDensity) }, [studioDensity])
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const update = () => setSystemDark(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen(value => !value)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   const params = useMemo(() => {
     const value = new URLSearchParams()
@@ -117,7 +153,7 @@ export default function App() {
 
   const openIdea = useCallback(async (id: number) => {
     const [detail, suggested] = await Promise.all([api.idea(id), api.suggestions(id)])
-    setSelected(detail); setSuggestions(suggested)
+    setSelected(detail); setSuggestions(suggested); setStudioInspectorOpen(true)
   }, [])
 
   useEffect(() => {
@@ -274,6 +310,18 @@ export default function App() {
     setView(next)
   }
 
+  function runStudioCommand(action: string) {
+    if (action === 'review') setReviewOpen(true)
+    else if (action === 'graph' || action === 'lineage' || action === 'focus' || action === 'cards') switchView(action)
+    else if (action === 'agent') setAgentContext(null)
+    else if (action === 'dream') setDreamOpen(true)
+    else if (action === 'projects') setManagingProjects(true)
+    else if (action === 'tags') setManagingTags(true)
+    else if (action === 'import') importInput.current?.click()
+    else if (action === 'export-json') window.location.href = '/api/export/json'
+    else if (action === 'export-md') window.location.href = '/api/export/markdown'
+  }
+
   const clearFilters = () => { setQuery(''); setActiveTags([]); setStatus(''); setRelationFilter('') }
   const filtered = Boolean(query || activeTags.length || status || relationFilter)
   const currentProject = scope.type === 'project' ? projects.find(project => project.id === scope.id) : undefined
@@ -295,9 +343,10 @@ export default function App() {
     }
   }
 
-  return <div className="app-shell">
+  return <div className="app-shell" data-ui-mode={uiMode} data-appearance={effectiveAppearance} data-density={studioDensity}>
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><Sprout size={22}/></div><div><strong>IdeaMiner</strong><span>research idea garden</span></div></div>
+      <button className="studio-search-trigger" onClick={() => setPaletteOpen(true)}><Search size={16}/><span>Search ideas or commands…</span><kbd>Ctrl K</kbd></button>
       <div className="top-actions">
         <button className="button agent-button" onClick={() => setAgentContext(null)}><Sparkles size={16}/> Agent</button>
         <button className="button dream-button" onClick={() => setDreamOpen(true)}><CloudMoon size={16}/> Dream{dreamIdeaIds.length ? ` · ${dreamIdeaIds.length}` : ''}</button>
@@ -308,11 +357,24 @@ export default function App() {
         <div className="export-menu"><button className="button ghost"><Download size={16}/> Export</button><div><a href="/api/export/markdown" download>Markdown</a><a href="/api/export/json" download>JSON</a></div></div>
         <button className="button quit-button" onClick={quitApplication} title="Quit IdeaMiner"><Power size={16}/> Quit</button>
         <button className="button primary" onClick={() => setEditor('new')}><Plus size={17}/> New idea</button>
+        <button className="button studio-capture" onClick={() => setEditor('new')}><Plus size={16}/> Capture</button>
+        <AppearanceMenu uiMode={uiMode} appearance={appearance} density={studioDensity} onUiMode={setUiMode} onAppearance={setAppearance} onDensity={setStudioDensity}/>
       </div>
     </header>
 
-    <main>
-      <aside className="sidebar">
+    <main className={studioNavOpen ? 'studio-nav-open' : ''}>
+      <button className="studio-nav-backdrop" aria-label="Close navigation" onClick={() => setStudioNavOpen(false)}/>
+      <aside className={`sidebar ${studioNavOpen ? 'studio-nav-open' : ''}`}>
+        <div className="studio-sidebar-nav">
+          <div className="studio-nav-label">WORKSPACE</div>
+          {([['focus', 'Focus', List], ['cards', 'Cards', LayoutGrid], ['graph', 'Graph', GitFork], ['lineage', 'Lineage', Route]] as const).map(([id, label, Icon]) => <button key={id} className={view === id ? 'active' : ''} onClick={() => { switchView(id); setStudioNavOpen(false) }}><Icon size={16}/>{label}{id === 'focus' && <span>{ideas.length}</span>}</button>)}
+          <div className="studio-nav-label">WORKFLOW</div>
+          <button onClick={() => { setReviewOpen(true); setStudioNavOpen(false) }}><ClipboardCheck size={16}/>Review</button>
+          <button onClick={() => { setAgentContext(null); setStudioNavOpen(false) }}><Sparkles size={16}/>Agent</button>
+          <button onClick={() => { setDreamOpen(true); setStudioNavOpen(false) }}><CloudMoon size={16}/>Dream</button>
+          <button onClick={() => { setManagingProjects(true); setStudioNavOpen(false) }}><FolderPlus size={16}/>Manage projects</button>
+          <button onClick={() => { setManagingTags(true); setStudioNavOpen(false) }}><Settings2 size={16}/>Manage tags</button>
+        </div>
         <div className="sidebar-label project-label"><Folder size={14}/> PROJECTS <button onClick={() => setManagingProjects(true)} title="Create project or group"><Plus size={14}/></button></div>
         <nav className="project-nav">
           <button className={scope.type === 'all' ? 'active' : ''} onClick={() => setScope({ type: 'all' })}><LayoutGrid size={14}/><span>All active ideas</span><small>{projects.filter(p => p.system_key !== 'recycle').reduce((total, p) => total + p.idea_count, 0)}</small></button>
@@ -333,10 +395,11 @@ export default function App() {
       </aside>
 
       <section className="workspace">
+        <div className="studio-mobile-toolbar"><button className="icon-button" aria-label="Open navigation" onClick={() => setStudioNavOpen(true)}><List size={18}/></button><select aria-label="Select workspace view" value={view} onChange={event => switchView(event.target.value as View)}><option value="focus">Focus</option><option value="cards">Cards</option><option value="graph">Graph</option><option value="lineage">Lineage</option></select></div>
         <select className="mobile-project-select" value={scope.type === 'all' ? 'all' : `${scope.type}:${scope.id}`} onChange={event => { const [type, id] = event.target.value.split(':'); setScope(type === 'all' ? { type: 'all' } : { type: type as 'project' | 'group', id: Number(id) }) }}><option value="all">All active ideas</option>{projectGroups.map(group => <option value={`group:${group.id}`} key={`g${group.id}`}>Group: {group.name}</option>)}{projects.map(project => <option value={`project:${project.id}`} key={`p${project.id}`}>{project.system_key === 'recycle' ? 'Recycle' : project.name}</option>)}</select>
         <div className="workspace-head"><div><p className="eyebrow">{scope.type === 'group' ? 'PROJECT GROUP' : currentProject?.system_key === 'recycle' ? 'RECYCLE BIN' : scope.type === 'project' ? 'PROJECT' : 'YOUR KNOWLEDGE GARDEN'}</p><h1>{query ? `Results in ${scopeTitle}` : activeTags.length ? `${scopeTitle} · #${activeTags[0]}` : scopeTitle}</h1><p>{ideas.length} {ideas.length === 1 ? 'thought' : 'thoughts'} · {relations.filter(r => ideas.some(i => i.id === r.source_id) && ideas.some(i => i.id === r.target_id)).length} visible connections</p></div><div className="workspace-actions">{currentProject && ideas.length > 0 && <button className="button bulk-delete" onClick={clearCurrentProject}><Trash2 size={15}/>{currentProject.system_key === 'recycle' ? 'Empty recycle' : 'Recycle all'}</button>}<div className="view-toggle"><button className={view === 'focus' ? 'active' : ''} onClick={() => switchView('focus')}><List size={16}/> Focus</button><button className={view === 'cards' ? 'active' : ''} onClick={() => switchView('cards')}><LayoutGrid size={16}/> Cards</button><button className={view === 'graph' ? 'active' : ''} onClick={() => switchView('graph')}><GitFork size={16}/> Graph</button><button className={view === 'lineage' ? 'active' : ''} onClick={() => switchView('lineage')}><Route size={16}/> Lineage</button></div></div></div>
         {error && <div className="error-banner">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}
-        {loading ? <div className="loading"><Sprout/> Growing your garden…</div> : ideas.length === 0 ? <div className="empty-state"><div>{currentProject?.system_key === 'recycle' ? <Trash2 size={30}/> : <Lightbulb size={30}/>}</div><h2>{filtered ? 'No ideas match' : currentProject?.system_key === 'recycle' ? 'Recycle is empty' : 'Plant your first idea'}</h2><p>{filtered ? 'Try widening your filters or searching another phrase.' : currentProject?.system_key === 'recycle' ? 'Deleted topics will wait here until you restore or permanently remove them.' : 'Capture a research question, a surprising connection, or a half-formed hunch.'}</p>{currentProject?.system_key !== 'recycle' && <button className="button primary" onClick={filtered ? clearFilters : () => setEditor('new')}>{filtered ? 'Clear filters' : <><Plus size={17}/> Capture an idea</>}</button>}</div> : view === 'graph' ? <GraphView ideas={ideas} relations={relations} onSelect={openIdea}/> : view === 'lineage' ? <LineageView ideas={ideas} relations={relations} onSelect={openIdea}/> : view === 'focus' ? <div className={`focus-browser ${focusDensity}`}>
+        {loading ? <div className="loading"><Sprout/> Growing your garden…</div> : ideas.length === 0 ? <div className="empty-state"><div>{currentProject?.system_key === 'recycle' ? <Trash2 size={30}/> : <Lightbulb size={30}/>}</div><h2>{filtered ? 'No ideas match' : currentProject?.system_key === 'recycle' ? 'Recycle is empty' : 'Plant your first idea'}</h2><p>{filtered ? 'Try widening your filters or searching another phrase.' : currentProject?.system_key === 'recycle' ? 'Deleted topics will wait here until you restore or permanently remove them.' : 'Capture a research question, a surprising connection, or a half-formed hunch.'}</p>{currentProject?.system_key !== 'recycle' && <button className="button primary" onClick={filtered ? clearFilters : () => setEditor('new')}>{filtered ? 'Clear filters' : <><Plus size={17}/> Capture an idea</>}</button>}</div> : view === 'graph' ? <GraphView ideas={ideas} relations={relations} onSelect={openIdea}/> : view === 'lineage' ? <LineageView ideas={ideas} relations={relations} onSelect={openIdea}/> : view === 'focus' ? <div className={`focus-browser ${focusDensity} studio-${studioDensity}`}>
           <section className="focus-list-pane">
             <header><div><strong>Idea navigator</strong><span>{ideas.length} visible · ↑↓ to move · Enter to expand</span></div><div className="density-toggle" aria-label="List density"><button className={focusDensity === 'comfortable' ? 'active' : ''} onClick={() => changeFocusDensity('comfortable')}>Roomy</button><button className={focusDensity === 'compact' ? 'active' : ''} onClick={() => changeFocusDensity('compact')}>Compact</button></div></header>
             <div className="focus-list" role="list">{ideas.map(idea => {
@@ -347,8 +410,8 @@ export default function App() {
               </article>
             })}</div>
           </section>
-          <aside className="focus-preview">{selected ? <>
-            <header><label className={`status-pill status-picker ${selected.status}`}><span/><select value={selected.status} onChange={event => void changeIdeaStatus(event.target.value as Status)} aria-label="Change idea status">{(Object.keys(statusLabels) as Status[]).map(value => <option value={value} key={value}>{statusLabels[value]}</option>)}</select></label><button className="icon-button" title="Open full screen" aria-label="Open idea full screen" onClick={() => setDetailFullscreen(true)}><Maximize2 size={16}/></button></header>
+          <aside className={`focus-preview ${studioInspectorOpen ? 'studio-inspector-open' : ''}`}>{selected ? <>
+            <header><label className={`status-pill status-picker ${selected.status}`}><span/><select value={selected.status} onChange={event => void changeIdeaStatus(event.target.value as Status)} aria-label="Change idea status">{(Object.keys(statusLabels) as Status[]).map(value => <option value={value} key={value}>{statusLabels[value]}</option>)}</select></label><div><button className="icon-button studio-inspector-close" aria-label="Close idea inspector" onClick={() => setStudioInspectorOpen(false)}><X size={16}/></button><button className="icon-button" title="Open full screen" aria-label="Open idea full screen" onClick={() => setDetailFullscreen(true)}><Maximize2 size={16}/></button></div></header>
             <p className="focus-context"><Folder size={13}/>{projects.find(project => project.id === selected.project_id)?.name ?? 'Unknown project'}<span>Updated {formatDate(selected.updated_at)}</span></p>
             <h2>{selected.title}</h2><div className="detail-tags">{selected.tags.map(tag => <span className="tag" style={styleForTag(tag)} key={tag}>#{tag}</span>)}</div>
             <div className="markdown focus-markdown"><IdeaMarkdown content={selected.content || '_No notes yet._'} ideas={allIdeas} attachments={selected.attachments} onIdeaSelect={openIdea} onFileOpen={id => void api.openAttachment(id)}/></div>
@@ -387,5 +450,6 @@ export default function App() {
     {dreamOpen && <DreamWorkspace ideaIds={dreamIdeaIds} ideas={allIdeas} projects={projects} onClose={() => setDreamOpen(false)} onRemove={id => setDreamIdeaIds(current => current.filter(item => item !== id))} onChanged={refresh} onIdeaSelect={id => { setDreamOpen(false); void openIdea(id) }} onOpenAgent={() => { setDreamOpen(false); setAgentContext(null) }}/>} 
     <button className={`dream-dock ${dreamIdeaIds.length ? 'ready' : ''}`} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addDreamIdea(Number(event.dataTransfer.getData('application/x-ideaminer-idea'))) }} onClick={() => setDreamOpen(true)}><CloudMoon size={18}/><span>{dreamIdeaIds.length ? `${dreamIdeaIds.length} idea${dreamIdeaIds.length === 1 ? '' : 's'} ready to Dream` : 'Drag ideas here to Dream'}</span></button>
     {stopped && <div className="shutdown-screen"><div className="shutdown-card"><div className="brand-mark"><Sprout size={25}/></div><p className="eyebrow">SHUTDOWN COMPLETE</p><h1>IdeaMiner has stopped.</h1><p>Your ideas are safely stored in SQLite. You can close this browser tab and double-click <code>start-ideaminer.bat</code> whenever you want to return.</p></div></div>}
+    {paletteOpen && <CommandPalette ideas={allIdeas} onClose={() => setPaletteOpen(false)} onOpenIdea={id => { void openIdea(id); switchView('focus') }} onCapture={() => { switchView('focus'); setEditor('new') }} onAction={runStudioCommand} uiMode={uiMode} onSwitchMode={() => setUiMode(value => value === 'studio' ? 'classic' : 'studio')} onToggleAppearance={() => setAppearance(value => value === 'dark' || (value === 'system' && systemDark) ? 'light' : 'dark')}/>}
   </div>
 }

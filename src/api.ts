@@ -1,4 +1,4 @@
-import type { AgentChatSession, AgentChatSessionDetails, AgentMessage, AgentMode, AgentProvider, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, MicroExperiment, Project, ProjectGroup, ReasoningEffort, Relation, ResearchGap, ResearchIntelligenceSettings, ReviewData, SemanticOpportunity, SemanticStatus, SerendipityPair, Status, Suggestion, TagInfo, TagMapData } from './types'
+import type { AgentChatSession, AgentChatSessionDetails, AgentMessage, AgentMode, AgentProvider, AgentRunResult, AgentRunSaveResult, AgentStatus, Attachment, Idea, MicroExperiment, Project, ProjectGroup, ProjectSyncPreview, RemoteMachine, RemoteStatus, ReasoningEffort, Relation, ResearchGap, ResearchIntelligenceSettings, ReviewData, SemanticOpportunity, SemanticStatus, SerendipityPair, Status, Suggestion, SyncPreviewItem, TagInfo, TagMapData } from './types'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -31,7 +31,22 @@ export interface ImportResult {
   experiments_created: number
 }
 
+export interface UpdateCheck {
+  current_version: string
+  latest_version: string | null
+  update_available: boolean
+  status: 'available' | 'up_to_date' | 'unavailable'
+  release_url: string
+  release_notes: string
+  published_at: string | null
+  can_update: boolean
+}
+
 export const api = {
+  updateVersion: () => request<{ current_version: string; can_update: boolean }>('/updates/current'),
+  checkUpdates: () => request<UpdateCheck>('/updates/check'),
+  applyUpdate: () => request<{ status: string }>('/updates/apply', { method: 'POST' }),
+  uninstallApp: (keep_database: boolean) => request<{ status: string }>('/updates/uninstall', { method: 'POST', body: JSON.stringify({ keep_database }) }),
   libraryState: () => request<{ revision: number }>('/library-state'),
   ideas: (params: URLSearchParams) => request<Idea[]>(`/ideas?${params}`),
   idea: (id: number) => request<Idea & { relations: Relation[]; attachments: Attachment[] }>(`/ideas/${id}`),
@@ -46,6 +61,13 @@ export const api = {
   createProject: (data: { name: string; description: string; group_id: number | null; workspace_mode: 'library' | 'linked' | 'managed'; workspace_path: string }) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
   clearProject: (id: number) => request<{ action: 'recycled' | 'deleted'; count: number }>(`/projects/${id}/ideas`, { method: 'DELETE' }),
   projectGroups: () => request<ProjectGroup[]>('/project-groups'),
+  remoteMachines: () => request<RemoteMachine[]>('/remotes'),
+  createRemoteMachine: (data: Omit<RemoteMachine, 'id' | 'created_at' | 'updated_at'>) => request<RemoteMachine>('/remotes', { method: 'POST', body: JSON.stringify(data) }),
+  updateRemoteMachine: (id: number, data: Omit<RemoteMachine, 'id' | 'created_at' | 'updated_at'>) => request<RemoteMachine>(`/remotes/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteRemoteMachine: (id: number) => request<{ id: number }>(`/remotes/${id}`, { method: 'DELETE' }),
+  checkRemoteMachine: (id: number) => request<RemoteStatus>(`/remotes/${id}/check`, { method: 'POST' }),
+  previewProjectSync: (data: { machine_id: number; project_id: number; direction: 'push' | 'pull'; local_root: string }) => request<ProjectSyncPreview>('/project-sync/preview', { method: 'POST', body: JSON.stringify(data) }),
+  executeProjectSync: (data: { preview_id: string; selected_paths: string[]; delete_paths: string[] }) => request<{ transferred: number; deleted: number; skipped: number; project_name: string; direction: 'push' | 'pull' }>('/project-sync/execute', { method: 'POST', body: JSON.stringify(data) }),
   createProjectGroup: (name: string) => request<ProjectGroup>('/project-groups', { method: 'POST', body: JSON.stringify({ name }) }),
   previewImport: (data: Record<string, unknown>) => request<ImportPreview>('/import/preview', { method: 'POST', body: JSON.stringify({ data }) }),
   importJson: (data: Record<string, unknown>, duplicate_strategy: 'skip' | 'copy' | 'update', project_strategy: 'merge' | 'rename') => request<ImportResult>('/import/json', { method: 'POST', body: JSON.stringify({ data, duplicate_strategy, project_strategy }) }),

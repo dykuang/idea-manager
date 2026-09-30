@@ -39,6 +39,39 @@ export interface ProjectGroup {
   idea_count: number
 }
 
+export interface RemoteMachine {
+  id: number
+  name: string
+  host: string
+  username: string
+  port: number
+  root_path: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RemoteStatus {
+  status: 'connected' | 'offline' | 'host_key_attention'
+  root_exists: boolean
+  message: string
+}
+
+export interface SyncPreviewItem {
+  path: string
+  status: 'new' | 'same' | 'conflict' | 'destination_only'
+  source_size: number | null
+  destination_size: number | null
+}
+
+export interface ProjectSyncPreview {
+  preview_id: string
+  project_name: string
+  direction: 'push' | 'pull'
+  local_root: string
+  remote_path: string
+  items: SyncPreviewItem[]
+}
+
 export interface Project {
   id: number
   name: string

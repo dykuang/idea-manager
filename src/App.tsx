@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ClipboardCheck, CloudMoon, Copy, Download, FileImage, Folder, FolderInput, FolderPlus, GitFork, Layers3, LayoutGrid, Lightbulb, Link2, List, ListFilter, Maximize2, Minimize2, Paperclip, Plus, Power, RefreshCw, Route, Search, Settings2, Sparkles, Sprout, Trash2, Upload, X } from 'lucide-react'
+import { ClipboardCheck, CloudMoon, Copy, Download, FileImage, Folder, FolderInput, FolderPlus, GitFork, Layers3, LayoutGrid, Lightbulb, Link2, List, ListFilter, Maximize2, Minimize2, Paperclip, Plus, Power, RefreshCw, Route, Search, Server, Settings2, Sparkles, Sprout, Trash2, Upload, X } from 'lucide-react'
 import { api, type ImportPreview, type ImportResult } from './api'
 import { AgentWorkspace } from './components/AgentWorkspace'
 import { AttachmentPanel } from './components/AttachmentPanel'
@@ -14,9 +14,11 @@ import { IdeaMarkdown, resolveIdeaReferencePlainText } from './components/IdeaMa
 import { ImportDialog } from './components/ImportDialog'
 import { LineageView } from './components/LineageView'
 import { ProjectManager } from './components/ProjectManager'
+import { RemotePanel } from './components/RemotePanel'
 import { RelationForm } from './components/RelationForm'
 import { ReviewDashboard } from './components/ReviewDashboard'
 import { TagManager } from './components/TagManager'
+import { VersionPanel } from './components/VersionPanel'
 import { tagGroupStyle, tagStyle } from './tagColors'
 import type { Idea, Project, ProjectGroup, Relation, Status, Suggestion, TagInfo } from './types'
 
@@ -76,6 +78,7 @@ export default function App() {
   const [projectGroups, setProjectGroups] = useState<ProjectGroup[]>([])
   const [scope, setScope] = useState<Scope>({ type: 'all' })
   const [managingProjects, setManagingProjects] = useState(false)
+  const [remoteOpen, setRemoteOpen] = useState(false)
   const [agentContext, setAgentContext] = useState<Idea | null | undefined>(undefined)
   const [agentDocked, setAgentDocked] = useState(() => window.localStorage.getItem('ideaminer-agent-docked') === 'true')
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -355,9 +358,11 @@ export default function App() {
         <button className="button dream-button" onClick={() => setDreamOpen(true)}><CloudMoon size={16}/> Dream{dreamIdeaIds.length ? ` · ${dreamIdeaIds.length}` : ''}</button>
         <button className="button ghost" onClick={() => setReviewOpen(true)}><ClipboardCheck size={16}/> Review</button>
         <button className="button projects-button" onClick={() => setManagingProjects(true)}><FolderPlus size={16}/> Projects</button>
+        <button className="button ghost remote-button" onClick={() => setRemoteOpen(true)}><Server size={16}/> Remote</button>
         <button className="button import-button" onClick={() => importInput.current?.click()}><Upload size={16}/> Import</button>
         <input className="hidden-file-input" ref={importInput} type="file" accept="application/json,.json" onChange={event => { void chooseImportFile(event.target.files?.[0]); event.target.value = '' }}/>
         <div className="export-menu"><button className="button ghost"><Download size={16}/> Export</button><div><a href="/api/export/markdown" download>Markdown</a><a href="/api/export/json" download>JSON</a></div></div>
+        <VersionPanel/>
         <button className="button quit-button" onClick={quitApplication} title="Quit IdeaMiner"><Power size={16}/> Quit</button>
         <button className="button primary" onClick={() => setEditor('new')}><Plus size={17}/> New idea</button>
         <button className="button studio-capture" onClick={() => setEditor('new')}><Plus size={16}/> Capture</button>
@@ -376,6 +381,7 @@ export default function App() {
           <button onClick={() => { setAgentContext(null); setStudioNavOpen(false) }}><Sparkles size={16}/>Agent</button>
           <button onClick={() => { setDreamOpen(true); setStudioNavOpen(false) }}><CloudMoon size={16}/>Dream</button>
           <button onClick={() => { setManagingProjects(true); setStudioNavOpen(false) }}><FolderPlus size={16}/>Manage projects</button>
+          <button onClick={() => { setRemoteOpen(true); setStudioNavOpen(false) }}><Server size={16}/>Remote sync</button>
           <button onClick={() => { setManagingTags(true); setStudioNavOpen(false) }}><Settings2 size={16}/>Manage tags</button>
         </div>
         <div className="sidebar-label project-label"><Folder size={14}/> PROJECTS <button onClick={() => setManagingProjects(true)} title="Create project or group"><Plus size={14}/></button></div>
@@ -434,6 +440,7 @@ export default function App() {
 
     {editor && <IdeaEditor idea={editor === 'new' ? null : editor} projects={projects} defaultProjectId={defaultProjectId} ideas={allIdeas} onClose={() => setEditor(null)} onSave={saveIdea}/>}
     {managingProjects && <ProjectManager groups={projectGroups} onClose={() => setManagingProjects(false)} onCreateProject={createProject} onCreateGroup={createProjectGroup}/>}
+    {remoteOpen && <RemotePanel projects={projects} onClose={() => setRemoteOpen(false)}/>}
     {importState && <ImportDialog filename={importState.filename} preview={importState.preview} onClose={() => setImportState(null)} onImport={runImport}/>}
     {managingTags && <TagManager visibleIdeaIds={ideas.map(idea => idea.id)} scope={scope} onClose={() => setManagingTags(false)} onChanged={refresh} onFilterTag={name => { setActiveTags([name]); setManagingTags(false) }}/>}
     {selected && (view !== 'focus' || detailFullscreen) && <div className={`drawer-backdrop ${detailFullscreen ? 'detail-fullscreen-backdrop' : ''}`} onMouseDown={e => e.target === e.currentTarget && (detailFullscreen ? setDetailFullscreen(false) : setSelected(null))}><aside className={`detail-drawer ${detailFullscreen ? 'fullscreen' : ''}`}>

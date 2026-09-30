@@ -26,7 +26,9 @@ from .agent_sessions import router as agent_sessions_router, save_chat_turn
 from .database import DB_PATH, db, init_db
 from .experiments import router as experiments_router
 from .research_insights import router as research_insights_router
+from .remote_sync import SYNC_ROUTER as project_sync_router, router as remote_sync_router
 from .serendipity import router as serendipity_router
+from .updates import router as updates_router
 from .schemas import AgentConnectionCreate, AgentProposalResolution, AgentResultSave, AgentRunRequest, AttachmentCreate, CodexCheckpointCreate, DreamRunRequest, ImportPreviewRequest, ImportRequest, IdeaAttachmentUpdate, IdeaCreate, IdeaUpdate, PathChoice, ProjectAssignment, ProjectCreate, ProjectGroupCreate, RelationCreate, TagBulkUpdate, TagMerge, TagRename, TagSettingsUpdate
 from .semantic import DIMENSIONS as SEMANTIC_DIMENSIONS, MODEL as SEMANTIC_MODEL, rebuild as rebuild_semantic_index, similarity as semantic_similarity
 
@@ -567,6 +569,9 @@ app.include_router(agent_sessions_router)
 app.include_router(experiments_router)
 app.include_router(research_insights_router)
 app.include_router(serendipity_router)
+app.include_router(remote_sync_router)
+app.include_router(project_sync_router)
+app.include_router(updates_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

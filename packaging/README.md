@@ -7,12 +7,12 @@ This packaging path gives users a click-to-install bootstrapper. The release con
 On the maintainer's Windows machine, install Node.js LTS, then run from the repository root:
 
 ```powershell
-.\packaging\Build-WebRelease.ps1 -Version 0.2.0
+.\packaging\Build-WebRelease.ps1 -Version 0.4.0
 ```
 
 The script runs `npm ci` and `npm run build`, then creates:
 
-- `release/ideaminer-0.2.0-windows.zip` and its `.sha256` checksum
+- `release/ideaminer-0.4.0-windows.zip` and its `.sha256` checksum
 - `release/ideaminer-windows.zip` and its `.sha256` checksum
 - `release/Install-IdeaMiner.bat`
 
@@ -23,6 +23,8 @@ Create a full, non-prerelease GitHub release and upload `ideaminer-windows.zip`,
 Users download and double-click `Install-IdeaMiner.bat`. The installer needs access to the GitHub release, but does not download Python or PyPI dependencies. It verifies the app ZIP against its SHA-256 asset before installing it, and does not need admin rights or a preinstalled Python or Node.js. To choose a location, run `Install-IdeaMiner.bat "D:\Apps\IdeaMiner"` from a terminal or shortcut target.
 
 The default install path is `%LOCALAPPDATA%\Programs\IdeaMiner`. The installer adds **IdeaMiner**, **Update IdeaMiner**, and **Connect Codex MCP** shortcuts to the Start Menu. The update shortcut detects the installed app directory and preserves a custom install path. The SQLite library remains at `%LOCALAPPDATA%\IdeaMiner\data\ideaminer.db`, outside the replaceable app directory.
+
+The in-app **Version and updates** panel also provides **Uninstall IdeaMiner**. Users can remove the app and all local IdeaMiner data, or remove the app while keeping only the SQLite database (including any SQLite journal files needed to preserve it). Project workspace files are left untouched in either case.
 
 The Codex helper requires Codex CLI to be installed. It registers the packaged MCP server with Codex, using the same Python environment and SQLite library as the app. Alternatively, run this in PowerShell:
 

@@ -35,6 +35,7 @@ try {
     Copy-Item (Join-Path $repoRoot 'packaging\Update-IdeaMiner.bat') (Join-Path $stage 'Update-IdeaMiner.bat')
     Copy-Item (Join-Path $repoRoot 'packaging\Install-IdeaMiner.bat') (Join-Path $stage 'Install-IdeaMiner.bat')
     Copy-Item (Join-Path $repoRoot 'packaging\Configure-Codex-MCP.bat') (Join-Path $stage 'Configure-Codex-MCP.bat')
+    Copy-Item (Join-Path $repoRoot 'packaging\Uninstall-IdeaMiner.ps1') (Join-Path $stage 'Uninstall-IdeaMiner.ps1')
     Copy-Item $frontendDist (Join-Path $stage 'web-dist') -Recurse
     $runtime = Join-Path $stage 'runtime'
     $runtimeZip = Join-Path $stage 'python-3.12-embed-amd64.zip'

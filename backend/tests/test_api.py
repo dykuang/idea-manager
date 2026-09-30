@@ -1,8 +1,11 @@
 import json
 import os
 import sqlite3
+import stat
 import tempfile
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 handle = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 handle.close()
@@ -18,6 +21,7 @@ from backend.app.database import db
 from backend.app import database as database_module
 from backend.app.main import _agent_context, app
 from backend.app import main as main_module
+from backend.app import remote_sync as remote_sync_module
 from backend.app.schemas import AgentRunRequest
 from backend.app.mcp_server import (
     copy_idea as mcp_copy_idea,
@@ -601,6 +605,188 @@ def test_codex_mcp_bridge_and_external_revision():
         client.delete(f"/api/ideas/{copied['id']}", params={"permanent": True})
         client.delete(f"/api/ideas/{child['id']}", params={"permanent": True})
         client.delete(f"/api/ideas/{parent['id']}", params={"permanent": True})
+
+
+class FakeSFTP:
+    def __init__(self):
+        self.directories = {"/", "/home", "/home/test", "/sync"}
+        self.files = {}
+        self.fail_upload = False
+
+    def normalize(self, path):
+        return "/home/test" if path == "." else path
+
+    def lstat(self, path):
+        if path in self.directories:
+            return SimpleNamespace(st_mode=stat.S_IFDIR, st_size=0)
+        if path in self.files:
+            return SimpleNamespace(st_mode=stat.S_IFREG, st_size=len(self.files[path]))
+        raise FileNotFoundError(2, "No such file", path)
+
+    def listdir_attr(self, directory):
+        entries = []
+        prefix = directory.rstrip("/") + "/"
+        direct_dirs = {path[len(prefix):].split("/")[0] for path in self.directories if path.startswith(prefix) and path != directory}
+        direct_files = {path[len(prefix):] for path in self.files if path.startswith(prefix) and "/" not in path[len(prefix):]}
+        for name in direct_dirs:
+            entries.append(SimpleNamespace(filename=name, st_mode=stat.S_IFDIR, st_size=0))
+        for name in direct_files:
+            entries.append(SimpleNamespace(filename=name, st_mode=stat.S_IFREG, st_size=len(self.files[prefix + name])))
+        return entries
+
+    def open(self, path, mode="rb"):
+        return BytesIO(self.files[path])
+
+    def mkdir(self, path, _mode=0o755):
+        self.directories.add(path)
+
+    def put(self, local_path, remote_path):
+        self.files[remote_path] = Path(local_path).read_bytes()[:3] if self.fail_upload else Path(local_path).read_bytes()
+        if self.fail_upload:
+            raise OSError("simulated interrupted transfer")
+
+    def get(self, remote_path, local_path):
+        Path(local_path).write_bytes(self.files[remote_path])
+
+    def posix_rename(self, old, new):
+        self.files[new] = self.files.pop(old)
+
+    def rename(self, old, new):
+        self.files[new] = self.files.pop(old)
+
+    def remove(self, path):
+        if path not in self.files:
+            raise FileNotFoundError(2, "No such file", path)
+        del self.files[path]
+
+    def close(self):
+        pass
+
+
+class FakeSSHClient:
+    def __init__(self, sftp):
+        self.sftp = sftp
+
+    def close(self):
+        pass
+
+
+def test_remote_sync_push_pull_and_preserves_destination_only(monkeypatch, tmp_path):
+    workspace = tmp_path / "project folder"
+    workspace.mkdir()
+    (workspace / "new file.txt").write_text("new payload", encoding="utf-8")
+    (workspace / "same.txt").write_text("unchanged", encoding="utf-8")
+    (workspace / "conflict.txt").write_text("local edit", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    try:
+        (workspace / "outside-link.txt").symlink_to(outside)
+    except OSError:
+        pass
+
+    fake_sftp = FakeSFTP()
+    remote_project = "/sync/Research project"
+    fake_sftp.directories.update({remote_project})
+    fake_sftp.files.update({
+        f"{remote_project}/same.txt": b"unchanged",
+        f"{remote_project}/conflict.txt": b"remote edit",
+        f"{remote_project}/remote only.txt": b"keep me",
+    })
+    monkeypatch.setattr(remote_sync_module, "_open_sftp", lambda _machine: (FakeSSHClient(fake_sftp), fake_sftp))
+    with TestClient(app) as client:
+        project = client.post("/api/projects", json={"name": "Research project", "workspace_mode": "linked", "workspace_path": str(workspace)}).json()
+        machine = client.post("/api/remotes", json={"name": "Ubuntu test", "host": "ubuntu", "username": "test", "root_path": "/sync"}).json()
+        assert client.post(f"/api/remotes/{machine['id']}/check").json()["status"] == "connected"
+        preview = client.post("/api/project-sync/preview", json={"machine_id": machine["id"], "project_id": project["id"], "direction": "push"}).json()
+        statuses = {row["path"]: row["status"] for row in preview["items"]}
+        assert statuses["new file.txt"] == "new"
+        assert statuses["same.txt"] == "same"
+        assert statuses["conflict.txt"] == "conflict"
+        assert statuses["remote only.txt"] == "destination_only"
+        assert "outside-link.txt" not in statuses
+
+        done = client.post("/api/project-sync/execute", json={"preview_id": preview["preview_id"], "selected_paths": ["new file.txt"], "delete_paths": []})
+        assert done.status_code == 200, done.text
+        assert fake_sftp.files[f"{remote_project}/new file.txt"] == b"new payload"
+        assert fake_sftp.files[f"{remote_project}/conflict.txt"] == b"remote edit"
+        assert fake_sftp.files[f"{remote_project}/remote only.txt"] == b"keep me"
+
+        deletion_preview = client.post("/api/project-sync/preview", json={"machine_id": machine["id"], "project_id": project["id"], "direction": "push"}).json()
+        assert client.post("/api/project-sync/execute", json={"preview_id": deletion_preview["preview_id"], "selected_paths": [], "delete_paths": ["remote only.txt"]}).status_code == 200
+        assert f"{remote_project}/remote only.txt" not in fake_sftp.files
+
+        conflict_preview = client.post("/api/project-sync/preview", json={"machine_id": machine["id"], "project_id": project["id"], "direction": "push"}).json()
+        overwrite = client.post("/api/project-sync/execute", json={"preview_id": conflict_preview["preview_id"], "selected_paths": ["conflict.txt"], "delete_paths": []})
+        assert overwrite.status_code == 200, overwrite.text
+        assert fake_sftp.files[f"{remote_project}/conflict.txt"] == b"local edit"
+
+        pull_source = f"{remote_project}/pull file.txt"
+        fake_sftp.files[pull_source] = b"from ubuntu"
+        pull_preview = client.post("/api/project-sync/preview", json={"machine_id": machine["id"], "project_id": project["id"], "direction": "pull"}).json()
+        pull_rows = {row["path"]: row["status"] for row in pull_preview["items"]}
+        assert pull_rows["pull file.txt"] == "new"
+        pulled = client.post("/api/project-sync/execute", json={"preview_id": pull_preview["preview_id"], "selected_paths": ["pull file.txt"], "delete_paths": []})
+        assert pulled.status_code == 200, pulled.text
+        assert (workspace / "pull file.txt").read_bytes() == b"from ubuntu"
+        assert client.post("/api/project-sync/execute", json={"preview_id": pull_preview["preview_id"], "selected_paths": ["../escape"], "delete_paths": []}).status_code == 410
+
+
+def test_remote_sync_interrupted_transfer_and_host_key_status(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "data file.txt").write_text("full content", encoding="utf-8")
+    fake_sftp = FakeSFTP()
+    fake_sftp.fail_upload = True
+    monkeypatch.setattr(remote_sync_module, "_open_sftp", lambda _machine: (FakeSSHClient(fake_sftp), fake_sftp))
+    with TestClient(app) as client:
+        project = client.post("/api/projects", json={"name": "Interrupted project", "workspace_mode": "linked", "workspace_path": str(workspace)}).json()
+        machine = client.post("/api/remotes", json={"name": "Ubuntu interrupted", "host": "ubuntu", "root_path": "/sync"}).json()
+        preview = client.post("/api/project-sync/preview", json={"machine_id": machine["id"], "project_id": project["id"], "direction": "push"}).json()
+        result = client.post("/api/project-sync/execute", json={"preview_id": preview["preview_id"], "selected_paths": ["data file.txt"], "delete_paths": []})
+        assert result.status_code == 502
+        assert "Sync stopped after 0 files" in result.json()["detail"]
+        assert not any(path.endswith(".tmp") for path in fake_sftp.files)
+        assert f"/sync/Interrupted project/data file.txt" not in fake_sftp.files
+
+        def untrusted(_machine):
+            raise remote_sync_module.paramiko.SSHException("Server not found in known_hosts")
+        monkeypatch.setattr(remote_sync_module, "_open_sftp", untrusted)
+        status = client.post(f"/api/remotes/{machine['id']}/check").json()
+        assert status["status"] == "host_key_attention", status
+        assert client.post("/api/project-sync/execute", json={"preview_id": preview["preview_id"], "selected_paths": ["../escape"], "delete_paths": []}).status_code == 400
+
+        monkeypatch.setattr(remote_sync_module, "_open_sftp", lambda _machine: (_ for _ in ()).throw(OSError("connection refused")))
+        assert client.post(f"/api/remotes/{machine['id']}/check").json()["status"] == "offline"
+
+
+def test_remote_sync_rejects_unknown_host_key(monkeypatch, tmp_path):
+    class RejectingSSHClient:
+        policy = None
+
+        def load_system_host_keys(self): pass
+        def load_host_keys(self, _path): pass
+        def set_missing_host_key_policy(self, policy): self.policy = policy
+        def connect(self, **_options):
+            assert isinstance(self.policy, remote_sync_module.paramiko.RejectPolicy)
+            raise remote_sync_module.paramiko.SSHException("Server not found in known_hosts")
+        def close(self): pass
+
+    monkeypatch.setattr(remote_sync_module, "_ssh_options", lambda _host: {})
+    monkeypatch.setattr(remote_sync_module.paramiko, "SSHClient", RejectingSSHClient)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    with TestClient(app) as client:
+        machine = client.post("/api/remotes", json={"name": "Unknown key", "host": "not-trusted", "root_path": "/sync"}).json()
+        status = client.post(f"/api/remotes/{machine['id']}/check").json()
+        assert status["status"] == "host_key_attention", status
+
+
+def test_remote_sync_dependency_missing_does_not_disable_library(monkeypatch):
+    monkeypatch.setattr(remote_sync_module.paramiko, "_ideaminer_missing", True, raising=False)
+    with TestClient(app) as client:
+        machine = client.post("/api/remotes", json={"name": "No SSH dependency", "host": "ubuntu", "root_path": "/sync"}).json()
+        status = client.post(f"/api/remotes/{machine['id']}/check")
+        assert status.status_code == 503
+        assert "Paramiko is installed" in status.json()["detail"]
 
 
 def teardown_module():

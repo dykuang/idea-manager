@@ -138,6 +138,12 @@ Example: elaborate a broad hypothesis into separate modeling and evaluation chil
 
 Markdown export is intended for reading. Local attachment contents are never bundled; exports contain only library records and references.
 
+## Remote project file sync
+
+Open **Remote** to save an SSH connection profile, check reachability, and compare a project folder with its remote copy. Profiles use the current user's SSH configuration, keys, and agent; private keys and passphrases are never stored by IdeaMiner. Add and verify the server fingerprint in `~/.ssh/known_hosts` through a trusted channel first. IdeaMiner rejects unknown or changed host keys.
+
+Each run is a push or pull. Review the file comparison before transferring; changed files are unchecked until selected, identical files are skipped, and destination-only files are preserved unless you explicitly select deletion. Sync includes the project workspace and linked attachments. SQLite, ideas, and relations remain local to each machine. A project without a workspace can use **Browse** to choose its local folder.
+
 ## Optional Codex integration
 
 `ideaminer_mcp.py` is the stable stdio entry point for the included MCP server. The reusable Codex skill source is under `integrations/codex/ideaminer`. Point your local MCP configuration at this repository's Python interpreter and `ideaminer_mcp.py`, with the working directory set to the repository root.

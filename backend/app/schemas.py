@@ -175,6 +175,35 @@ class PathChoice(BaseModel):
     initial_path: str = Field(default="", max_length=2000)
 
 
+class RemoteMachineCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    host: str = Field(min_length=1, max_length=255)
+    username: str = Field(default="", max_length=100)
+    port: int = Field(default=0, ge=0, le=65535)
+    root_path: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("name", "host", "username", "root_path")
+    @classmethod
+    def trim_remote_value(cls, value: str) -> str:
+        value = value.strip()
+        if any(char in value for char in "\x00\r\n"):
+            raise ValueError("Remote settings cannot contain control characters")
+        return value
+
+
+class ProjectSyncPreview(BaseModel):
+    machine_id: int
+    project_id: int
+    direction: Literal["push", "pull"]
+    local_root: str = Field(default="", max_length=2000)
+
+
+class ProjectSyncExecute(BaseModel):
+    preview_id: str = Field(min_length=32, max_length=32)
+    selected_paths: list[str] = Field(default_factory=list, max_length=10000)
+    delete_paths: list[str] = Field(default_factory=list, max_length=10000)
+
+
 class TagSettingsUpdate(BaseModel):
     group_name: str = Field(default="", max_length=80)
     is_hidden: bool = False

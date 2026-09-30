@@ -2,7 +2,8 @@
 param(
     [string]$PackageUrl = 'https://github.com/dykuang/idea-manager/releases/latest/download/ideaminer-windows.zip',
     [string]$PythonVersion = '3.12.10',
-    [string]$InstallRoot = ''
+    [string]$InstallRoot = '',
+    [switch]$LaunchAfterUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +37,7 @@ try {
 
     $stage = Join-Path $work 'app'
     Expand-Archive -Path $zipPath -DestinationPath $stage
-    if (-not (Test-Path (Join-Path $stage 'launcher.py')) -or -not (Test-Path (Join-Path $stage 'web-dist\index.html')) -or -not (Test-Path (Join-Path $stage 'runtime\python.exe'))) {
+    if (-not (Test-Path (Join-Path $stage 'launcher.py')) -or -not (Test-Path (Join-Path $stage 'web-dist\index.html')) -or -not (Test-Path (Join-Path $stage 'runtime\python.exe')) -or -not (Test-Path (Join-Path $stage 'Uninstall-IdeaMiner.ps1'))) {
         throw 'The downloaded archive is not a valid IdeaMiner release.'
     }
 
@@ -76,6 +77,9 @@ try {
     Write-Host ''
     Write-Host 'IdeaMiner is installed. Launch it from the Start Menu.'
     Write-Host 'Your library is stored separately in %LOCALAPPDATA%\IdeaMiner\data.'
+    if ($LaunchAfterUpdate) {
+        Start-Process -FilePath (Join-Path $appRoot 'Start-IdeaMiner.bat') -WorkingDirectory $appRoot
+    }
 }
 finally {
     if (Test-Path $work) { Remove-Item $work -Recurse -Force }

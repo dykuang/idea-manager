@@ -31,7 +31,22 @@ export interface ImportResult {
   experiments_created: number
 }
 
+export interface UpdateCheck {
+  current_version: string
+  latest_version: string | null
+  update_available: boolean
+  status: 'available' | 'up_to_date' | 'unavailable'
+  release_url: string
+  release_notes: string
+  published_at: string | null
+  can_update: boolean
+}
+
 export const api = {
+  updateVersion: () => request<{ current_version: string; can_update: boolean }>('/updates/current'),
+  checkUpdates: () => request<UpdateCheck>('/updates/check'),
+  applyUpdate: () => request<{ status: string }>('/updates/apply', { method: 'POST' }),
+  uninstallApp: (keep_database: boolean) => request<{ status: string }>('/updates/uninstall', { method: 'POST', body: JSON.stringify({ keep_database }) }),
   libraryState: () => request<{ revision: number }>('/library-state'),
   ideas: (params: URLSearchParams) => request<Idea[]>(`/ideas?${params}`),
   idea: (id: number) => request<Idea & { relations: Relation[]; attachments: Attachment[] }>(`/ideas/${id}`),

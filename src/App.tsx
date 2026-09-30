@@ -18,6 +18,7 @@ import { RemotePanel } from './components/RemotePanel'
 import { RelationForm } from './components/RelationForm'
 import { ReviewDashboard } from './components/ReviewDashboard'
 import { TagManager } from './components/TagManager'
+import { VersionPanel } from './components/VersionPanel'
 import { tagGroupStyle, tagStyle } from './tagColors'
 import type { Idea, Project, ProjectGroup, Relation, Status, Suggestion, TagInfo } from './types'
 
@@ -361,6 +362,7 @@ export default function App() {
         <button className="button import-button" onClick={() => importInput.current?.click()}><Upload size={16}/> Import</button>
         <input className="hidden-file-input" ref={importInput} type="file" accept="application/json,.json" onChange={event => { void chooseImportFile(event.target.files?.[0]); event.target.value = '' }}/>
         <div className="export-menu"><button className="button ghost"><Download size={16}/> Export</button><div><a href="/api/export/markdown" download>Markdown</a><a href="/api/export/json" download>JSON</a></div></div>
+        <VersionPanel/>
         <button className="button quit-button" onClick={quitApplication} title="Quit IdeaMiner"><Power size={16}/> Quit</button>
         <button className="button primary" onClick={() => setEditor('new')}><Plus size={17}/> New idea</button>
         <button className="button studio-capture" onClick={() => setEditor('new')}><Plus size={16}/> Capture</button>

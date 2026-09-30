@@ -1,5 +1,7 @@
 # IdeaMiner
 
+[English](#ideaminer) · [简体中文](#ideaminer中文)
+
 IdeaMiner is a local-first research idea manager built with React, TypeScript, FastAPI, SQLite FTS5, and Cytoscape.js. It captures ideas without rewriting the original text, organizes them into projects, and visualizes how they develop and connect.
 
 Your SQLite database is the canonical source of truth. The core application runs locally and does not require an account, cloud database, or API key.
@@ -208,6 +210,8 @@ Copyright 2026 Dongyang Kuang. Licensed under the [Apache License 2.0](LICENSE).
 IdeaMiner 是一款本地优先（local-first）的研究想法管理工具，基于 React、TypeScript、FastAPI、SQLite FTS5 和 Cytoscape.js 构建。它可以在完整保留最初灵感字句的前提下记录想法，将其按项目清晰归类，并直观呈现想法的演进脉络与关联网络。
 
 本地 SQLite 数据库是应用的唯一真实数据源（Single Source of Truth）。核心功能完全在本地运行，无需注册账号、无需云端数据库，也不强制要求 API Key。
+
+项目 Wiki：[安装与快速开始](docs/wiki/Getting-Started.md)、[研究工作流](docs/wiki/Ideas-and-Research-Workflow.md)、[研究智能功能](docs/wiki/Research-Intelligence.md)、[隐私与备份](docs/wiki/Data-Privacy-and-Backup.md)、[SSH 远程同步](docs/wiki/Remote-Sync.md)、[开发指南与常见问题](docs/wiki/Developer-Guide.md)。
 
 ![IdeaMiner 概览，展示项目、筛选器、标签、阶段和研究想法卡片](docs/ideaminer-overview.png)
 

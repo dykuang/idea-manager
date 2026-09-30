@@ -7,12 +7,12 @@ This packaging path gives users a click-to-install bootstrapper. The release con
 On the maintainer's Windows machine, install Node.js LTS, then run from the repository root:
 
 ```powershell
-.\packaging\Build-WebRelease.ps1 -Version 0.4.0
+.\packaging\Build-WebRelease.ps1 -Version 0.4.1
 ```
 
 The script runs `npm ci` and `npm run build`, then creates:
 
-- `release/ideaminer-0.4.0-windows.zip` and its `.sha256` checksum
+- `release/ideaminer-0.4.1-windows.zip` and its `.sha256` checksum
 - `release/ideaminer-windows.zip` and its `.sha256` checksum
 - `release/Install-IdeaMiner.bat`
 

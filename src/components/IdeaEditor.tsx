@@ -3,6 +3,7 @@ import { Columns2, FilePlus2, Link2, X } from 'lucide-react'
 import { api } from '../api'
 import type { Idea, Project, Status } from '../types'
 import { IdeaMarkdown } from './IdeaMarkdown'
+import { useI18n } from '../i18n'
 
 interface Props {
   idea?: Idea | null
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function IdeaEditor({ idea, projects, defaultProjectId, ideas, onClose, onSave }: Props) {
+  const { t } = useI18n()
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [status, setStatus] = useState<Status>('seed')
@@ -76,22 +78,22 @@ export function IdeaEditor({ idea, projects, defaultProjectId, ideas, onClose, o
 
   return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}>
     <form className="editor" onSubmit={submit}>
-      <header><div><span className="eyebrow">{idea ? 'REFINE THE THOUGHT' : 'CAPTURE A SPARK'}</span><h2>{idea ? 'Edit idea' : 'New idea'}</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={20}/></button></header>
-      <label>Title<input autoFocus required maxLength={240} value={title} onChange={e => setTitle(e.target.value)} placeholder="A concise name for the idea" /></label>
-      <div className="editor-notes-heading"><strong>Notes</strong><span><Columns2 size={13}/> Synchronized Markdown + LaTeX preview</span></div>
+      <header><div><span className="eyebrow">{t(idea ? 'REFINE THE THOUGHT' : 'CAPTURE A SPARK')}</span><h2>{t(idea ? 'Edit idea' : 'New idea')}</h2></div><button type="button" className="icon-button" aria-label={t('Close')} onClick={onClose}><X size={20}/></button></header>
+      <label>{t('Title')}<input autoFocus required maxLength={240} value={title} onChange={e => setTitle(e.target.value)} placeholder={t('A concise name for the idea')} /></label>
+      <div className="editor-notes-heading"><strong>{t('Notes')}</strong><span><Columns2 size={13}/> {t('Synchronized Markdown + LaTeX preview')}</span></div>
       <div className="editor-compose">
-        <section className="compose-pane"><label htmlFor="idea-notes">Writing</label><textarea id="idea-notes" ref={sourceRef} value={content} onChange={e => setContent(e.target.value)} onScroll={event => previewRef.current && synchronize(event.currentTarget, previewRef.current, 'writing')} placeholder={'Describe the idea… Use $x^2$ inline or $$\\mathcal{L} = \\sum_i \\ell_i$$ for a display equation.'}/></section>
-        <section className="compose-pane preview-pane" aria-label="Rendered preview"><div className="compose-pane-label">Preview</div><div ref={previewRef} className="markdown" onScroll={event => sourceRef.current && synchronize(event.currentTarget, sourceRef.current, 'preview')}>{content.trim() ? <IdeaMarkdown content={content} ideas={ideas} attachments={idea?.attachments}/> : <p className="preview-placeholder">The rendered note will appear here beside your source.</p>}</div></section>
+        <section className="compose-pane"><label htmlFor="idea-notes">{t('Writing')}</label><textarea id="idea-notes" ref={sourceRef} value={content} onChange={e => setContent(e.target.value)} onScroll={event => previewRef.current && synchronize(event.currentTarget, previewRef.current, 'writing')} placeholder={t('Describe the idea… Use $x^2$ inline or $$\\mathcal{L} = \\sum_i \\ell_i$$ for a display equation.')}/></section>
+        <section className="compose-pane preview-pane" aria-label={t('Rendered preview')}><div className="compose-pane-label">{t('Preview')}</div><div ref={previewRef} className="markdown" onScroll={event => sourceRef.current && synchronize(event.currentTarget, sourceRef.current, 'preview')}>{content.trim() ? <IdeaMarkdown content={content} ideas={ideas} attachments={idea?.attachments}/> : <p className="preview-placeholder">{t('The rendered note will appear here beside your source.')}</p>}</div></section>
       </div>
       <div className="form-row">
-        <label>Status<select value={status} onChange={e => setStatus(e.target.value as Status)}><option value="seed">Seed</option><option value="exploring">Exploring</option><option value="promising">Promising</option><option value="parked">Parked</option></select></label>
-        <label>Tags<input value={tags} onChange={e => setTags(e.target.value)} placeholder="ml, methods, reading" /></label>
+        <label>{t('Status')}<select value={status} onChange={e => setStatus(e.target.value as Status)}><option value="seed">{t('Seed')}</option><option value="exploring">{t('Exploring')}</option><option value="promising">{t('Promising')}</option><option value="parked">{t('Parked')}</option></select></label>
+        <label>{t('Tags')}<input value={tags} onChange={e => setTags(e.target.value)} placeholder={t('ml, methods, reading')} /></label>
       </div>
-      {!idea && <label>Project<select value={projectId} onChange={e => setProjectId(Number(e.target.value))}>{projects.filter(project => project.system_key !== 'recycle').map(project => <option value={project.id} key={project.id}>{project.name}{project.group_name ? ` — ${project.group_name}` : ''}</option>)}</select></label>}
-      <section className="editor-file-links"><div><strong><Link2 size={14}/> Local file links</strong><span>Paths and metadata only—file contents are never stored in your idea.</span></div><button type="button" className="button secondary small" onClick={() => void chooseQuickFile()}><FilePlus2 size={14}/> Link a file</button>{queuedFiles.length > 0 && <ul>{queuedFiles.map(path => <li key={path}><code title={path}>{path}</code><button type="button" aria-label={`Remove ${path}`} onClick={() => setQueuedFiles(current => current.filter(item => item !== path))}><X size={13}/></button></li>)}</ul>}<small>Saving adds a clickable `[[file:…]]` reference to the note. The Agent can locate it by path and only reads it if you explicitly select it for a run.</small></section>
-      {!idea && <p className="raw-note">The first capture is preserved verbatim, even as the idea evolves.</p>}
+      {!idea && <label>{t('Project')}<select value={projectId} onChange={e => setProjectId(Number(e.target.value))}>{projects.filter(project => project.system_key !== 'recycle').map(project => <option value={project.id} key={project.id}>{project.name}{project.group_name ? ` — ${project.group_name}` : ''}</option>)}</select></label>}
+      <section className="editor-file-links"><div><strong><Link2 size={14}/> {t('Local file links')}</strong><span>{t('Paths and metadata only—file contents are never stored in your idea.')}</span></div><button type="button" className="button secondary small" onClick={() => void chooseQuickFile()}><FilePlus2 size={14}/> {t('Link a file')}</button>{queuedFiles.length > 0 && <ul>{queuedFiles.map(path => <li key={path}><code title={path}>{path}</code><button type="button" aria-label={t('Remove file link')} onClick={() => setQueuedFiles(current => current.filter(item => item !== path))}><X size={13}/></button></li>)}</ul>}<small>{t('Saving adds a clickable `[[file:…]]` reference to the note. The Agent can locate it by path and only reads it if you explicitly select it for a run.')}</small></section>
+      {!idea && <p className="raw-note">{t('The first capture is preserved verbatim, even as the idea evolves.')}</p>}
       {fileError && <p className="workspace-error">{fileError}</p>}
-      <footer><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={saving}>{saving ? 'Saving…' : idea ? 'Save changes' : 'Plant idea'}</button></footer>
+      <footer><button type="button" className="button secondary" onClick={onClose}>{t('Cancel')}</button><button className="button primary" disabled={saving}>{saving ? t('Saving…') : idea ? t('Save changes') : t('Plant idea')}</button></footer>
     </form>
   </div>
 }

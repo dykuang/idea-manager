@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Check, Download, ExternalLink, RefreshCw, Trash2, X } from 'lucide-react'
 import { api, type UpdateCheck } from '../api'
+import { useI18n } from '../i18n'
 
 export function VersionPanel() {
+  const { t, language } = useI18n()
   const [current, setCurrent] = useState('…')
   const [canUpdate, setCanUpdate] = useState(false)
   const [open, setOpen] = useState(false)
@@ -14,6 +16,13 @@ export function VersionPanel() {
   const [uninstalling, setUninstalling] = useState(false)
 
   useEffect(() => { void api.updateVersion().then(value => { setCurrent(value.current_version); setCanUpdate(value.can_update) }).catch(() => setCurrent('unknown')) }, [])
+
+  useEffect(() => {
+    if (!open) return
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [open])
 
   async function checkNow() {
     setChecking(true); setError('')
@@ -36,34 +45,35 @@ export function VersionPanel() {
   }
 
   return <>
-    <button className="version-trigger" onClick={show} title="Check IdeaMiner version and updates"><span>IdeaMiner</span><small>v{current}</small></button>
+    <button className="version-trigger" onClick={show} title={t('Check IdeaMiner version and updates')}><span>IdeaMiner</span><small>v{current}</small></button>
     {open && <div className="modal-backdrop version-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false) }}>
       <section className="editor version-dialog" role="dialog" aria-modal="true" aria-labelledby="version-title">
-        <header><div><p className="eyebrow">APPLICATION</p><h2 id="version-title">Version and updates</h2></div><button className="icon-button" onClick={() => setOpen(false)} aria-label="Close"><X size={18}/></button></header>
+        <header><div><p className="eyebrow">{t('APPLICATION')}</p><h2 id="version-title">{t('Version and updates')}</h2></div><button className="button secondary version-close" onClick={() => setOpen(false)} aria-label={t('Close')}><X size={16}/><span>{t('Close')}</span></button></header>
         {!uninstallChoice ? <>
-        <div className="version-current"><span>Installed version</span><strong>v{current}</strong></div>
-        {checking && <p className="version-message"><RefreshCw size={15} className="version-spin"/> Checking the latest release…</p>}
-        {!checking && check?.status === 'up_to_date' && <p className="version-message success"><Check size={16}/> You’re using the latest version.</p>}
-        {!checking && check?.status === 'available' && <div className="version-available"><p>A newer version is available: <strong>v{check.latest_version}</strong></p>{check.published_at && <small>Released {new Date(check.published_at).toLocaleDateString()}</small>}</div>}
-        {!checking && check?.status === 'unavailable' && <p className="version-message">Could not reach GitHub. Your installed version is still shown above.</p>}
-        {check?.release_notes && <div className="version-notes"><h3>Release notes</h3><pre>{check.release_notes}</pre></div>}
+        <div className="version-current"><span>{t('Installed version')}</span><strong>v{current}</strong></div>
+        {checking && <p className="version-message"><RefreshCw size={15} className="version-spin"/> {t('Checking the latest release…')}</p>}
+        {!checking && check?.status === 'up_to_date' && <p className="version-message success"><Check size={16}/> {t('You’re using the latest version.')}</p>}
+        {!checking && check?.status === 'available' && <div className="version-available"><p>{t('A newer version is available:')} <strong>v{check.latest_version}</strong></p>{check.published_at && <small>{t('Released')} {new Date(check.published_at).toLocaleDateString(language === 'zh-CN' ? 'zh-CN' : undefined)}</small>}</div>}
+        {!checking && check?.status === 'unavailable' && <p className="version-message">{t('Could not reach GitHub. Your installed version is still shown above.')}</p>}
+        {check?.release_notes && <div className="version-notes"><h3>{t('Release notes')}</h3><pre>{check.release_notes}</pre></div>}
         {error && <p className="error-message">{error}</p>}
-        {applying && <p className="version-message">The updater is starting. IdeaMiner will close, install the update, then reopen.</p>}
+        {applying && <p className="version-message">{t('The updater is starting. IdeaMiner will close, install the update, then reopen.')}</p>}
         <footer>
-          <button className="button secondary" onClick={() => void checkNow()} disabled={checking || applying}><RefreshCw size={14}/> Check again</button>
-          {check?.update_available && check.can_update && <button className="button primary" onClick={() => void install()} disabled={applying}><Download size={15}/> Install and restart</button>}
-          {check?.update_available && !check.can_update && <a className="button primary" href={check.release_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/> View release</a>}
-          {!check?.update_available && check?.release_url && <a className="version-release-link" href={check.release_url} target="_blank" rel="noreferrer">View releases <ExternalLink size={12}/></a>}
-          {canUpdate && <button className="button version-uninstall-button" onClick={() => { setUninstallChoice(true); setError('') }} disabled={applying}><Trash2 size={14}/> Uninstall IdeaMiner</button>}
+          <button className="button secondary version-close-footer" onClick={() => setOpen(false)}>{t('Close')}</button>
+          <button className="button secondary" onClick={() => void checkNow()} disabled={checking || applying}><RefreshCw size={14}/> {t('Check again')}</button>
+          {check?.update_available && check.can_update && <button className="button primary" onClick={() => void install()} disabled={applying}><Download size={15}/> {t('Install and restart')}</button>}
+          {check?.update_available && !check.can_update && <a className="button primary" href={check.release_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/> {t('View release')}</a>}
+          {!check?.update_available && check?.release_url && <a className="version-release-link" href={check.release_url} target="_blank" rel="noreferrer">{t('View releases')} <ExternalLink size={12}/></a>}
+          {canUpdate && <button className="button version-uninstall-button" onClick={() => { setUninstallChoice(true); setError('') }} disabled={applying}><Trash2 size={14}/> {t('Uninstall IdeaMiner')}</button>}
         </footer>
         </> : <div className="version-uninstall-options">
-          <p className="eyebrow">REMOVE IDEAMINER</p><h3>What should be kept?</h3>
-          {uninstalling ? <p className="version-message">The uninstaller is starting. IdeaMiner will close and remove the selected files.</p> : <>
-            <button onClick={() => void uninstall(true)}><strong>Keep only the database</strong><span>Remove the app, settings, and other local IdeaMiner data. Keep the SQLite library database.</span></button>
-            <button className="danger-option" onClick={() => void uninstall(false)}><strong>Remove everything</strong><span>Remove the app and all IdeaMiner data stored in its local data folder.</span></button>
-            <p className="version-uninstall-note">Files in your project workspace folders are left untouched.</p>
+          <p className="eyebrow">{t('REMOVE IDEAMINER')}</p><h3>{t('What should be kept?')}</h3>
+          {uninstalling ? <p className="version-message">{t('The uninstaller is starting. IdeaMiner will close and remove the selected files.')}</p> : <>
+            <button onClick={() => void uninstall(true)}><strong>{t('Keep only the database')}</strong><span>{t('Remove the app, settings, and other local IdeaMiner data. Keep the SQLite library database.')}</span></button>
+            <button className="danger-option" onClick={() => void uninstall(false)}><strong>{t('Remove everything')}</strong><span>{t('Remove the app and all IdeaMiner data stored in its local data folder.')}</span></button>
+            <p className="version-uninstall-note">{t('Files in your project workspace folders are left untouched.')}</p>
             {error && <p className="error-message">{error}</p>}
-            <footer><button className="button secondary" onClick={() => setUninstallChoice(false)}>Cancel</button></footer>
+            <footer><button className="button secondary" onClick={() => setUninstallChoice(false)}>{t('Cancel')}</button></footer>
           </>}
         </div>}
       </section>

@@ -373,4 +373,36 @@ main{grid-template-columns:255px 1fr}.sidebar{padding-bottom:90px;max-height:cal
 @media(max-width:900px){.agent-is-docked main{height:calc(100vh - 72px - 42vh);min-height:230px;margin-right:0;overflow:auto}.agent-docked{top:auto;left:0;right:0;bottom:0;width:auto;height:42vh;border-left:0;border-top:1px solid var(--line);box-shadow:0 -10px 28px #1b15251a}.agent-workspace-docked{padding:13px 16px 20px}.agent-workspace-docked .agent-chat-history{max-height:18vh;min-height:75px}.agent-workspace-docked .agent-chat-welcome{min-height:70px}.agent-is-docked .drawer-backdrop{right:0;bottom:42vh}.agent-is-docked .detail-drawer{height:100%}.agent-is-docked .detail-drawer.fullscreen{width:100%;padding:18px}}
 .version-trigger{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:transparent;border-radius:7px;padding:7px 9px;color:var(--muted);font:500 11px "DM Sans",sans-serif;cursor:pointer;white-space:nowrap}.version-trigger:hover{background:#edf1eb;color:var(--ink)}.version-trigger small{font:600 10px ui-monospace,monospace;color:var(--green)}.version-backdrop{z-index:2200}.version-dialog{width:min(560px,calc(100vw - 28px));padding:25px}.version-dialog>header{align-items:flex-start}.version-dialog>header h2{font-size:29px;margin:2px 0 18px}.version-current{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);background:#f7f7f1;border-radius:9px;padding:14px 15px;margin:8px 0 15px;color:var(--muted);font-size:12px}.version-current strong{font:650 13px ui-monospace,monospace;color:var(--ink)}.version-message,.version-available{display:flex;align-items:center;gap:8px;padding:11px 12px;border-radius:8px;background:#f1f2ec;color:#657169;font-size:12px}.version-message.success{background:#edf5ee;color:#33744e}.version-available{display:block;background:#eef4f0;color:#425b4d}.version-available p{margin:0}.version-available small{display:block;margin-top:6px;color:#85918a}.version-spin{animation:version-spin 1s linear infinite}@keyframes version-spin{to{transform:rotate(360deg)}}.version-notes{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}.version-notes h3{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)}.version-notes pre{max-height:180px;overflow:auto;white-space:pre-wrap;font:12px/1.55 "DM Sans",sans-serif;color:#56635c}.version-dialog footer{align-items:center;flex-wrap:wrap}.version-dialog footer .version-release-link{display:flex;align-items:center;gap:4px;margin-right:auto;color:#68766e;font-size:11px;text-decoration:none}
 @media(max-width:760px){.version-trigger{padding:7px}.version-trigger span{display:none}}
+.language-switch{display:flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.language-switch button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:650;padding:5px 7px;border-radius:7px;cursor:pointer;white-space:nowrap}.language-switch button[aria-pressed="true"]{background:var(--green);color:#fff}
+@media(max-width:900px){.language-switch button{padding:5px 6px}}
+
+/* Keep the full set of research actions readable in both English and Chinese. */
+.topbar { height:auto; min-height:104px; padding:10px clamp(14px, 2.2vw, 30px) 8px; display:flex; flex-direction:column; align-items:stretch; justify-content:center; gap:8px; }
+.topbar-primary { display:flex; align-items:center; justify-content:space-between; gap:18px; min-width:0; }
+.topbar-utilities { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex:none; }
+.top-actions { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:7px; min-width:0; padding-top:8px; border-top:1px solid var(--line); }
+main { min-height:calc(100vh - 112px); }
+.version-dialog>header { position:sticky; top:-25px; z-index:2; align-items:flex-start; padding:2px 0 8px; margin-bottom:4px; background:#fffdf8; }
+.version-close { min-height:36px; white-space:nowrap; }
+.version-close-footer { margin-right:auto; }
+
+[data-ui-mode="studio"] .topbar { height:56px; min-height:56px; padding:0 20px; flex-direction:row; align-items:center; justify-content:stretch; gap:14px; }
+[data-ui-mode="studio"] .topbar-primary { display:contents; }
+[data-ui-mode="studio"] .topbar-utilities { gap:5px; margin-left:auto; }
+[data-ui-mode="studio"] .topbar-utilities .quit-button { display:none; }
+[data-ui-mode="studio"] .top-actions { flex:none; padding:0; border:0; }
+[data-ui-mode="studio"] main { min-height:calc(100vh - 56px); }
+
+@media(max-width:760px) {
+  .topbar { padding:9px 12px 7px; gap:7px; }
+  .topbar-primary { gap:8px; }
+  .topbar-utilities { gap:4px; }
+  .top-actions { flex-wrap:nowrap; overflow-x:auto; justify-content:flex-start; padding:7px 0 3px; scrollbar-width:thin; }
+  .top-actions > * { flex:none; }
+  .topbar-utilities .quit-button { width:36px; min-width:36px; padding:8px; }
+  .topbar-utilities .quit-button svg { margin:0; }
+  .topbar-utilities .quit-button { font-size:0; }
+  [data-ui-mode="studio"] .topbar { padding:0 12px; gap:8px; }
+  [data-ui-mode="studio"] .topbar-utilities { gap:2px; }
+}
  .version-uninstall-button{margin-left:auto;color:#975743;background:transparent;border:1px solid #e3d4cc}.version-uninstall-button:hover{background:#f8eee9}.version-uninstall-options{padding-top:8px}.version-uninstall-options h3{font-size:21px;margin:4px 0 16px;color:var(--ink)}.version-uninstall-options>button{display:block;width:100%;padding:13px 14px;margin:9px 0;border:1px solid var(--line);border-radius:9px;background:#faf9f4;color:var(--ink);text-align:left;cursor:pointer}.version-uninstall-options>button:hover{border-color:#a9bbae;background:#f3f6f1}.version-uninstall-options>button strong,.version-uninstall-options>button span{display:block}.version-uninstall-options>button strong{font-size:13px}.version-uninstall-options>button span{margin-top:5px;color:#747e78;font-size:11px;line-height:1.5}.version-uninstall-options>button.danger-option{border-color:#e5d4ce}.version-uninstall-options>button.danger-option:hover{background:#fbf1ed;border-color:#ca9987}.version-uninstall-note{font-size:11px;color:#78817d;line-height:1.5}.version-uninstall-options footer{justify-content:flex-end}

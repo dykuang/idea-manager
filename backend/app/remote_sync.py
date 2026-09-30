@@ -13,7 +13,18 @@ import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import paramiko
+try:
+    import paramiko
+except ImportError:  # Keep the local library usable if optional SSH packages aren't installed yet.
+    class _ParamikoUnavailableError(Exception):
+        pass
+
+    class _ParamikoUnavailable:
+        _ideaminer_missing = True
+        SSHException = _ParamikoUnavailableError
+        BadHostKeyException = _ParamikoUnavailableError
+
+    paramiko = _ParamikoUnavailable()  # type: ignore[assignment]
 from fastapi import APIRouter, HTTPException
 
 from .database import DB_PATH, db
@@ -52,6 +63,8 @@ def _ssh_options(host_alias: str) -> dict[str, Any]:
 
 
 def _open_sftp(machine: dict[str, Any]):
+    if getattr(paramiko, "_ideaminer_missing", False):
+        raise HTTPException(503, "SSH sync is unavailable until Paramiko is installed from backend/requirements.txt")
     options = _ssh_options(machine["host"])
     client = paramiko.SSHClient()
     client.load_system_host_keys()

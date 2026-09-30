@@ -780,6 +780,15 @@ def test_remote_sync_rejects_unknown_host_key(monkeypatch, tmp_path):
         assert status["status"] == "host_key_attention", status
 
 
+def test_remote_sync_dependency_missing_does_not_disable_library(monkeypatch):
+    monkeypatch.setattr(remote_sync_module.paramiko, "_ideaminer_missing", True, raising=False)
+    with TestClient(app) as client:
+        machine = client.post("/api/remotes", json={"name": "No SSH dependency", "host": "ubuntu", "root_path": "/sync"}).json()
+        status = client.post(f"/api/remotes/{machine['id']}/check")
+        assert status.status_code == 503
+        assert "Paramiko is installed" in status.json()["detail"]
+
+
 def teardown_module():
     try:
         os.unlink(handle.name)
